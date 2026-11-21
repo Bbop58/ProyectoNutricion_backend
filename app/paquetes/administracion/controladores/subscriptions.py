@@ -1,0 +1,248 @@
+from fastapi import Query
+from fastapi.responses import StreamingResponse
+from app.models.subscription_receipt import SubscriptionReceipt
+from app.schemas.subscription import SubscriptionReceiptOut
+from app.services.subscription_receipt_service import SubscriptionReceiptService
+"""
+Subscription management endpoints.
+
+Provides plan listing, order creation/capture (PayPal),
+active subscription queries, cancellation, and payment history.
+"""
+
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.api.deps import get_current_user
+from app.models.user import User
+from app.models.subscription import Subscription
+from app.schemas.subscription import (
+    CreateOrderRequest,
+    CreateOrderResponse,
+    CaptureOrderRequest,
+    SubscriptionHistoryOut,
+    SubscriptionOut,
+    SubscriptionPlanOut,
+    VerifyOrderResponse,
+)
+from app.services.subscription_service import SubscriptionService
+
+router = APIRouter(prefix="/subscriptions", tags=["Subscriptions"])
+
+
+# ------------------------------------------------------------------ #
+#  Public — list available plans
+# ------------------------------------------------------------------ #
+@router.get("/plans", response_model=List[SubscriptionPlanOut])
+def list_plans():
+    """Return the catalogue of subscription plans (no auth required)."""
+    return SubscriptionService.get_plans()
+
+
+# ------------------------------------------------------------------ #
+#  Current subscription for the logged-in user or user's tenant
+# ------------------------------------------------------------------ #
+@router.get("/current", response_model=SubscriptionOut | None)
+def get_current_subscription(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return the active subscription for the user or user's tenant, or null."""
+    # Check user-level subscription first (Mobile Patient / Individual Client)
+    active_sub = SubscriptionService.get_active(db, user_id=current_user.id)
+    if active_sub and active_sub.plan_name == "CLIENTE_PREMIUM":
+        return active_sub
+
+    # Mobile Patients/Clients only have personal subscriptions (CLIENTE_PREMIUM); they never inherit clinic SaaS subscriptions
+    if current_user.role_id in ["PACIENTE", "CLIENTE"]:
+        return None
+
+    # For clinic administrators or SaaS staff, check tenant-level subscription
+    if current_user.tenant_id:
+        return SubscriptionService.get_active(db, tenant_id=current_user.tenant_id)
+
+    return None
+
+
+# ------------------------------------------------------------------ #
+#  Create a PayPal order (start checkout)
+# ------------------------------------------------------------------ #
+@router.post("/create-order", response_model=CreateOrderResponse)
+def create_order(
+    body: CreateOrderRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Create a PayPal checkout order for the given plan."""
+    # Determine if it's a client or admin plan
+    plan_name = body.plan_name.upper()
+    is_client_plan = plan_name.startswith("CLIENTE")
+
+    tenant_id = current_user.tenant_id
+    user_id = current_user.id
+
+    if not is_client_plan:
+        if not tenant_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Tu cuenta no está asociada a una organización (tenant). Contacta al administrador.",
+            )
+        if current_user.role_id not in ("SUPERADMIN", "ADMIN_ORGANIZATION"):
+            raise HTTPException(
+                status_code=403,
+                detail="Solo los administradores pueden gestionar suscripciones corporativas.",
+            )
+
+    from app.api.v1.consultation_payments import mobile_return_url
+    try:
+        result = SubscriptionService.create_order(
+            db,
+            tenant_id=tenant_id,
+            plan_name=body.plan_name,
+            user_id=user_id,
+            checkout_return_url=mobile_return_url(request) if body.mobile else None,
+        )
+        return CreateOrderResponse(
+            order_id=result["order_id"],
+            approval_url=result["approval_url"],
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Error con PayPal: {str(e)}")
+
+
+# ------------------------------------------------------------------ #
+#  Capture order (finalize payment after buyer approval)
+# ------------------------------------------------------------------ #
+@router.post("/capture", response_model=SubscriptionOut)
+def capture_order(
+    body: CaptureOrderRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Capture a PayPal order after the buyer approved the checkout."""
+    try:
+        subscription = SubscriptionService.capture_order(
+            db,
+            body.order_id,
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+        )
+        return subscription
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Error al capturar pago: {str(e)}")
+
+
+# ------------------------------------------------------------------ #
+#  Direct Sandbox validation / activation (for testing mobile flows)
+# ------------------------------------------------------------------ #
+@router.post("/validate-sandbox", response_model=SubscriptionOut)
+def validate_sandbox_subscription(
+    body: Optional[CaptureOrderRequest] = None,
+    order_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    raise HTTPException(status_code=410, detail="La activación directa fue retirada. Verifica una orden pagada.")
+
+
+# ------------------------------------------------------------------ #
+#  Verify PayPal order status and activate only if paid
+# ------------------------------------------------------------------ #
+@router.post("/verify-order", response_model=VerifyOrderResponse)
+def verify_order(
+    body: CaptureOrderRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Verifies if PayPal order has been approved or paid.
+    Returns paid=False with a descriptive message if the buyer has not paid yet.
+    Only activates if paid.
+    """
+    owned = db.query(Subscription).filter_by(paypal_order_id=body.order_id, user_id=current_user.id).first()
+    if not owned:
+        raise HTTPException(status_code=404, detail="Orden no encontrada para tu cuenta.")
+    try:
+        result = SubscriptionService.verify_and_capture_order(
+            db,
+            order_id=body.order_id,
+            user_id=current_user.id,
+            tenant_id=current_user.tenant_id,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    sub_out = None
+    if result.get("subscription"):
+        sub_out = SubscriptionOut.model_validate(result["subscription"])
+    return VerifyOrderResponse(
+        paid=result["paid"],
+        status=result["status"],
+        message=result["message"],
+        subscription=sub_out,
+    )
+
+
+
+# ------------------------------------------------------------------ #
+#  Cancel active subscription
+# ------------------------------------------------------------------ #
+@router.post("/cancel", response_model=SubscriptionOut)
+def cancel_subscription(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Cancel the active subscription."""
+    try:
+        return SubscriptionService.cancel(
+            db,
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+# ------------------------------------------------------------------ #
+#  Payment history
+# ------------------------------------------------------------------ #
+@router.get("/history", response_model=List[SubscriptionHistoryOut])
+def get_history(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return the full subscription history for the user or tenant."""
+    return SubscriptionService.get_history(
+        db,
+        tenant_id=current_user.tenant_id,
+        user_id=current_user.id,
+    )
+
+
+@router.get("/receipts", response_model=List[SubscriptionReceiptOut])
+def list_receipts(
+    limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    return db.query(SubscriptionReceipt).filter(SubscriptionReceipt.user_id == current_user.id).order_by(
+        SubscriptionReceipt.paid_at.desc(), SubscriptionReceipt.id.desc()).offset(offset).limit(limit).all()
+
+
+@router.get("/receipts/{receipt_id}/pdf")
+def download_receipt(
+    receipt_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    receipt = db.query(SubscriptionReceipt).filter_by(id=receipt_id, user_id=current_user.id).first()
+    if receipt is None:
+        raise HTTPException(status_code=404, detail="Comprobante no encontrado para tu cuenta.")
+    stream = SubscriptionReceiptService.generate_pdf(receipt)
+    return StreamingResponse(stream, media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="Recibo_NutriSalud_{receipt.id}.pdf"',
+        "Cache-Control": "private, no-store",
+    })
