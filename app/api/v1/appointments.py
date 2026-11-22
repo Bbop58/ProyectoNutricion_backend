@@ -15,6 +15,28 @@ from app.services.appointment_service import AppointmentService
 router = APIRouter(prefix="/appointments", tags=["Appointments"])
 
 
+@router.get('/{appointment_id}/pdf')
+def appointment_document(appointment_id: str, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    from fastapi.responses import StreamingResponse
+    from app.services.document_service import appointment_pdf
+    return StreamingResponse(appointment_pdf(db,user,appointment_id), media_type='application/pdf',
+        headers={'Content-Disposition': f'attachment; filename="Constancia_cita_{appointment_id}.pdf"'})
+
+
+@router.get('/{appointment_id}/receipt/pdf')
+def appointment_receipt(appointment_id: str, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    from fastapi.responses import StreamingResponse
+    from app.services.document_service import appointment_access
+    from app.models.payment import Payment
+    from app.services.payment_service import PaymentService
+    from app.core.exceptions import NotFoundException
+    appointment_access(db,user,appointment_id)
+    payment = db.query(Payment).filter_by(appointment_id=appointment_id,status='COMPLETED').first()
+    if not payment: raise NotFoundException('La cita no tiene un pago confirmado.')
+    stream, filename = PaymentService.generate_payment_pdf(db,payment.id)
+    return StreamingResponse(stream,media_type='application/pdf',headers={'Content-Disposition':f'attachment; filename="{filename}"'})
+
+
 @router.post("", response_model=AppointmentOut)
 def schedule_appointment(
     body: AppointmentCreate,

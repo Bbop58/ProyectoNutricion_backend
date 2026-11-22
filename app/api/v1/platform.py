@@ -182,7 +182,8 @@ def assign(identity: str, data: Assignment, user=Depends(platform_user), db: Ses
         branch_id=admin.branch_id if admin else None, plan_name=plan.code, plan_snapshot=plan_dict(plan),
         source='MANUAL', status='ACTIVE', amount=0, currency=plan.currency, started_at=now(), expires_at=now()+timedelta(days=plan.duration_days))
     db.add(subscription)
-    audit(db, user, 'PLAN_ASIGNADO', identity, data.reason, before, {'plan': plan.code, 'source': 'MANUAL'})
+    db.flush()
+    audit(db, user, 'PLAN_ASIGNADO', identity, data.reason, before, {'plan': plan.code, 'source': 'MANUAL', 'subscription_id':subscription.id})
     db.commit()
     return subscription_dict(subscription)
 
@@ -192,6 +193,14 @@ def subscriptions(offset: int=Query(0, ge=0), limit: int=Query(50, ge=1, le=100)
                   user=Depends(platform_user), db: Session=Depends(get_db)):
     query = db.query(Subscription, Tenant.name).join(Tenant, Tenant.id == Subscription.tenant_id).filter(~Subscription.plan_name.like('CLIENTE_%'))
     return dict(total=query.count(), items=[dict(subscription_dict(s), company_name=name) for s, name in query.order_by(Subscription.created_at.desc()).offset(offset).limit(limit).all()])
+
+
+@router.get('/subscriptions/{identity}/pdf')
+def assignment_document(identity: str, user=Depends(platform_user), db: Session=Depends(get_db)):
+    from fastapi.responses import StreamingResponse
+    from app.services.document_service import assignment_pdf
+    return StreamingResponse(assignment_pdf(db,user,identity),media_type='application/pdf',
+        headers={'Content-Disposition':f'attachment; filename="Nota_plan_{identity}.pdf"'})
 
 
 @router.get('/audit')

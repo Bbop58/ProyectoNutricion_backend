@@ -32,6 +32,13 @@ from app.services.subscription_service import SubscriptionService
 router = APIRouter(prefix="/subscriptions", tags=["Subscriptions"])
 
 
+@router.get('/{identity}/assignment/pdf')
+def assignment_document(identity: str, db: Session=Depends(get_db), user=Depends(get_current_user)):
+    from app.services.document_service import assignment_pdf
+    return StreamingResponse(assignment_pdf(db,user,identity),media_type='application/pdf',
+        headers={'Content-Disposition':f'attachment; filename="Nota_plan_{identity}.pdf"'})
+
+
 # ------------------------------------------------------------------ #
 #  Public — list available plans
 # ------------------------------------------------------------------ #

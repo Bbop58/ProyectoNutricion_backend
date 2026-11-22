@@ -36,6 +36,7 @@ class CaptureOrderRequest(BaseModel):
 
 
 class SubscriptionOut(BaseModel):
+    source: str = 'PAYPAL'
     id: str
     tenant_id: Optional[str] = None
     user_id: Optional[str] = None
