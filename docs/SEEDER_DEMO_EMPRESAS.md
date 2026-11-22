@@ -7,10 +7,12 @@ Genera cinco empresas ficticias con actividad entre el 1 de enero y el 22 de nov
 - Reutiliza `VIDASANA` si ya existe; crea las otras empresas solo si faltan.
 - Usa los planes y precios que define `SubscriptionService.PLANS`: dos empresas Básico con 8 y 10 pacientes, dos Profesional con 32 y 45, y una Premium con 64.
 - Asigna 1, 1, 2, 3 y 5 sucursales como tamaños de muestra. Los planes actuales no definen límites de sucursales.
-- Registra once periodos sucesivos de 30 días por empresa: diez `REPLACED` y uno `ACTIVE`, que cubre noviembre. No crea órdenes, capturas ni comprobantes falsos de PayPal.
+- Registra once periodos sucesivos de 30 días por empresa: diez `REPLACED` y uno `ACTIVE`, que cubre noviembre. Asocia el pago al administrador y a su sucursal principal, siguiendo el ámbito de trabajo que aplica la API a los historiales. Cada periodo genera un recibo **marcado como sandbox** con referencias `DEMO-*`; no llama a PayPal ni representa dinero real. El PDF del recibo advierte que es un pago de prueba.
 - Crea cuentas y nombres ficticios con correos `@example.test`, pacientes vinculados, citas completadas y cobros de consulta en efectivo al precio vigente de USD 5.
+- Los cobros de consulta se registran como `Payment` completados, asociados a cita, paciente, sucursal y cajero. Así entran en la caja y en las estadísticas de cobros. Las suscripciones y sus recibos quedan asociados al administrador y a su sucursal principal, por lo que aparecen bajo el aislamiento por sucursal de su historial y reportes personales.
 - Agrega ocho recetas generales de muestra a cada empresa cuyo plan incluya `Recetario & Macros` (Profesional y Premium). Son recetas de catálogo, sin prescripción individual ni asignaciones automáticas.
 - Agrega uno o dos registros manuales de comidas por paciente y por mes activo. Son diarios auto-reportados sintéticos; no simulan análisis por foto ni respuestas de Gemini.
+- El CLI informa ingresos brutos simulados separados: suscripciones, consultas cobradas y total. Con los planes y precios actuales, la muestra representa USD 1.319,45 en suscripciones y USD 1.760,00 en consultas (USD 3.079,45 brutos en total). No hay un módulo de costos/gastos que permita calcular utilidad neta. Las recargas de wallet son saldo prepagado del paciente y no se cuentan como ingreso de la clínica.
 - Es idempotente: las claves estables evitan duplicados. Las empresas, sucursales y cuentas que ya existían no se borran ni se reemplazan.
 
 No crea anamnesis, diagnósticos, ni planes nutricionales aprobados: la anamnesis requiere consentimiento y el plan real debe generarse con esos datos y pasar por revisión profesional. El catálogo base de alimentos y parámetros del sistema experto se carga por `prepare_db.py`.
@@ -46,4 +48,4 @@ Ese último comando agrega registros a la base indicada por `DATABASE_URL`; no e
 
 El diario de comidas se asocia a cada paciente de muestra.
 
-Los códigos de empresa son `vidasana`, `nutrifit`, `equilibrio`, `andina` y `vitalia`. El CLI informa cuántos registros nuevos creó. Repetirlo con la misma contraseña no duplica información ni cambia contraseñas de cuentas existentes.
+Los códigos de empresa son `vidasana`, `nutrifit`, `equilibrio`, `andina` y `vitalia`. El CLI informa cuántos registros nuevos creó y el total bruto simulado. Repetirlo con la misma contraseña no duplica información ni cambia contraseñas de cuentas existentes.

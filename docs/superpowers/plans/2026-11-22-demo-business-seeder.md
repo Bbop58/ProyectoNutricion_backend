@@ -11,7 +11,7 @@ Provide an explicit, idempotent backend seeder for five sample nutrition busines
 - Keep the generated dataset in a dedicated backend seeder module and expose it through a one-shot CLI command; never seed the five businesses automatically on API startup.
 - Use stable tenant codes, branch codes, reserved `.example.test` emails, and deterministic IDs so re-running the command fills missing demo records without duplicating or replacing real records.
 - Reuse the existing `VIDASANA` sample tenant and `PRINCIPAL` branch when present. Add only missing demo companies, branches, demo users, patient links, historical appointments, cash consultation payments, and monthly subscription periods.
-- Keep synthetic subscriptions local: do not invent PayPal order/capture IDs or issue provider receipts. Model eleven consecutive 30-day periods per business, leaving one current `ACTIVE` period and marking prior periods `REPLACED`.
+- Model eleven consecutive 30-day SaaS periods per business, leaving one current `ACTIVE` period and marking prior periods `REPLACED`. Link each to its company administrator and primary branch, matching the real checkout workspace because API history and receipt queries are branch-scoped. Add explicitly synthetic sandbox receipts with `DEMO-*` references; never call PayPal or suggest these are real charges.
 - Seed tenant-level recipe catalogs only when the plan metadata includes `Recetario & Macros`; seed manual self-reported food diary records for synthetic patients using the same payload and idempotency shape as the API.
 - Do not seed anamneses, AI photo analyses, or approved personal meal plans. Those flows depend on user consent, a real photo/Gemini analysis, or a clinician's review and approval.
 - Require an explicitly supplied seed password for newly created demo users. Require an explicit CLI production flag before adding synthetic records to a production database.
@@ -27,7 +27,8 @@ Provide an explicit, idempotent backend seeder for five sample nutrition busines
 - Seed five companies in total, counting the existing `VIDASANA` sample company when present.
 - Assign plans and active patient counts below the actual plan caps: two `BASICO` tenants (8 and 10 patients), two `PROFESIONAL` tenants (32 and 45 patients), and one `PREMIUM` tenant (64 patients).
 - Assign uneven sample branch counts of 1, 1, 2, 3, and 5. These numbers illustrate business size and do not imply plan entitlements.
-- Create valid company admin and nutritionist users, linked patient accounts, and synthetic historical clinic visits. Completed consultation charges must use the existing USD 5 fee, cash method, and no fake PayPal identifiers.
+- Create valid company admin and nutritionist users, linked patient accounts, and synthetic historical clinic visits. Completed consultation charges must use the configured USD 5 fee, cash method, real cashier/cash-register associations, and no fake PayPal identifiers.
+- Verify subscription receipts appear in the buyer's history/reports; verify completed consultation cash is included in clinic cash statistics. Report simulated SaaS and clinic gross receipts separately, excluding wallet top-ups and avoiding any claim of net profit without an expense model.
 - Add generic, clearly labeled demo recipes for plans that include the recipe feature, and historical manual diary entries with no fabricated image or AI result.
 - Store business/subscription/user activity within 2026-01-01 through 2026-11-22. Preserve existing unrelated tenant, branch, and user data.
 - The CLI must state how many records it created and be safe to run repeatedly.
@@ -37,7 +38,7 @@ Provide an explicit, idempotent backend seeder for five sample nutrition busines
 
 - Do not delete or overwrite existing non-demo records.
 - Do not run this seeder against Railway or another remote database as part of local implementation.
-- Do not fabricate external payment credentials, PayPal IDs, receipts, or real patient identities.
+- Do not fabricate external payment credentials, provider transaction IDs, real patient identities, or imply demo receipts are real money. Synthetic receipt references must be visibly `DEMO-*` and sandbox-marked.
 - Do not fabricate patient consent, medical diagnoses, AI image analysis, or nutrition-plan approval.
 - Keep the change scoped to backend seeding, the existing `VIDASANA` startup seed, documentation, and targeted tests.
 

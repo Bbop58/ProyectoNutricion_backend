@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal, ROUND_HALF_UP
 import hashlib
 import json
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -15,10 +16,11 @@ from app.models.appointment import Appointment
 from app.models.company import Branch, CompanyAdministrator
 from app.models.ai_nutrition import FoodRecord
 from app.models.patient_link import PatientNutritionistLink
-from app.models.payment import Payment
+from app.models.payment import Payment, cash_register_filter
 from app.models.recipe import Recipe
 from app.models.rbac import Role
 from app.models.subscription import Subscription
+from app.models.subscription_receipt import SubscriptionReceipt
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.schemas.ai_nutrition import FoodRecordCreate
@@ -240,7 +242,8 @@ def _ensure_branches(db: Session, tenant: Tenant, company: DemoCompany,
 
 
 def _ensure_subscriptions(db: Session, tenant: Tenant, branch: Branch,
-                          company: DemoCompany, report: dict[str, int]) -> None:
+                          company: DemoCompany, buyer: User,
+                          report: dict[str, int]) -> None:
     plan = PLANS.get(company.plan)
     if not plan:
         raise ValueError(f"El plan {company.plan} no existe en SubscriptionService.PLANS.")
@@ -257,12 +260,37 @@ def _ensure_subscriptions(db: Session, tenant: Tenant, branch: Branch,
         expires_at = started_at + timedelta(days=30)
         status = "ACTIVE" if period_index == 10 else "REPLACED"
         subscription_id = _id("subscription", company.code, period_index + 1)
-        if db.get(Subscription, subscription_id):
+        existing = db.get(Subscription, subscription_id)
+        if existing:
+            if (
+                existing.tenant_id != tenant.id
+                or existing.plan_name != company.plan
+                or existing.amount != plan["price"]
+                or existing.currency != plan["currency"]
+                or existing.started_at != started_at
+                or existing.expires_at != expires_at
+            ):
+                raise ValueError(f"La suscripción demo {subscription_id} ya existe con datos distintos.")
+            if existing.user_id not in (None, buyer.id):
+                raise ValueError(f"La suscripción demo {subscription_id} está asociada a otro comprador.")
+            if existing.user_id is None:
+                if existing.paypal_order_id or existing.paypal_capture_id:
+                    raise ValueError(
+                        f"La suscripción demo {subscription_id} tiene referencias de pago; no se modificó el comprador."
+                    )
+                # Backfill rows created by the first version of this seeder so
+                # the real subscription-history query can find the purchaser.
+                existing.user_id = buyer.id
+            if not existing.paypal_order_id and not existing.paypal_capture_id and not existing.branch_id:
+                # Match the real checkout workspace. Branch scope is applied
+                # by the API to subscription history and receipt queries.
+                existing.branch_id = buyer.branch_id or branch.id
             continue
         db.add(Subscription(
             id=subscription_id,
             tenant_id=tenant.id,
-            branch_id=branch.id,
+            branch_id=buyer.branch_id or branch.id,
+            user_id=buyer.id,
             plan_name=company.plan,
             status=status,
             amount=plan["price"],
@@ -272,6 +300,62 @@ def _ensure_subscriptions(db: Session, tenant: Tenant, branch: Branch,
             created_at=started_at,
         ))
         report["subscriptions"] += 1
+    db.flush()
+
+
+def _ensure_subscription_receipts(db: Session, tenant: Tenant, buyer: User,
+                                   company: DemoCompany, report: dict[str, int]) -> None:
+    """Create clearly simulated sandbox receipts; never call or impersonate PayPal."""
+    for period_index in range(11):
+        subscription_id = _id("subscription", company.code, period_index + 1)
+        subscription = db.get(Subscription, subscription_id)
+        if not subscription:
+            raise RuntimeError(f"Falta la suscripción demo {subscription_id} para emitir su recibo de muestra.")
+        if subscription.user_id != buyer.id or subscription.tenant_id != tenant.id:
+            raise ValueError(f"La suscripción demo {subscription_id} no pertenece a su comprador esperado.")
+
+        existing = db.get(SubscriptionReceipt, subscription.id)
+        if existing:
+            if (
+                existing.user_id != buyer.id
+                or existing.tenant_id != tenant.id
+                or existing.branch_id != subscription.branch_id
+                or existing.plan_name != subscription.plan_name
+                or Decimal(str(existing.amount)) != Decimal(str(subscription.amount)).quantize(Decimal("0.01"))
+                or existing.currency != subscription.currency
+                or existing.is_sandbox is not True
+                or not existing.paypal_order_id.startswith("DEMO-ORDER-")
+                or not existing.paypal_capture_id.startswith("DEMO-CAPTURE-")
+                or existing.paid_at != subscription.started_at
+            ):
+                raise ValueError(f"El recibo de suscripción demo {subscription_id} ya existe con datos distintos.")
+            continue
+
+        # Only paid-like lifecycle states may produce a demo receipt. A
+        # pending, failed, or cancelled subscription must not inflate revenue.
+        if subscription.status not in {"ACTIVE", "REPLACED", "EXPIRED"}:
+            continue
+
+        # DEMO-* references are intentionally not PayPal transaction IDs.
+        # is_sandbox makes the PDF say that no real money was collected.
+        db.add(SubscriptionReceipt(
+            id=subscription.id,
+            tenant_id=tenant.id,
+            branch_id=subscription.branch_id,
+            user_id=buyer.id,
+            buyer_name=buyer.full_name,
+            buyer_email=buyer.email,
+            plan_name=subscription.plan_name,
+            amount=Decimal(str(subscription.amount)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+            currency=subscription.currency,
+            paypal_order_id=f"DEMO-ORDER-{subscription.id}",
+            paypal_capture_id=f"DEMO-CAPTURE-{subscription.id}",
+            is_sandbox=True,
+            paid_at=subscription.started_at,
+            expires_at=subscription.expires_at,
+            issued_at=subscription.started_at,
+        ))
+        report["subscription_receipts"] += 1
     db.flush()
 
 
@@ -537,8 +621,49 @@ def _ensure_patient_history(db: Session, tenant: Tenant, branches: list[Branch],
     db.flush()
 
 
+def _demo_revenue_summary(db: Session) -> dict[str, float]:
+    """Summarize only stable demo rows, separating SaaS sales from clinic cash."""
+    subscription_ids: list[str] = []
+    payment_ids: list[str] = []
+    for company in DEMO_COMPANIES:
+        subscription_ids.extend(
+            _id("subscription", company.code, period_index + 1)
+            for period_index in range(11)
+        )
+        for patient_index in range(company.patient_count):
+            patient_number = patient_index + 1
+            joined_month = (
+                (patient_index * 11) // (company.patient_count - 1)
+                if company.patient_count > 1 else 0
+            )
+            joined_month = min(joined_month, 10)
+            available_months = 11 - joined_month
+            visit_count = min(1 + (patient_index % 4), available_months)
+            payment_ids.extend(
+                _id("consultation-payment", company.code, patient_number, visit_index + 1)
+                for visit_index in range(visit_count)
+            )
+
+    receipts = db.query(SubscriptionReceipt).filter(
+        SubscriptionReceipt.id.in_(subscription_ids)
+    ).all()
+    payments = db.query(Payment).filter(
+        Payment.id.in_(payment_ids),
+        Payment.status == "COMPLETED",
+        cash_register_filter(),
+    ).all()
+    subscription_revenue = sum((Decimal(str(row.amount)) for row in receipts), Decimal("0.00"))
+    consultation_revenue = sum((Decimal(str(row.amount)) for row in payments), Decimal("0.00"))
+    gross_revenue = subscription_revenue + consultation_revenue
+    return {
+        "subscription_revenue_usd": float(subscription_revenue.quantize(Decimal("0.01"))),
+        "consultation_revenue_usd": float(consultation_revenue.quantize(Decimal("0.01"))),
+        "gross_revenue_usd": float(gross_revenue.quantize(Decimal("0.01"))),
+    }
+
+
 def seed_demo_businesses(db: Session, password: str, *, environment: str,
-                         allow_production: bool = False) -> dict[str, int]:
+                         allow_production: bool = False) -> dict[str, int | float]:
     """Seed five fictional companies and Jan-Nov 2026 history, safely repeatable."""
     if not password or not password.strip():
         raise ValueError("Define una contraseña no vacía para crear las cuentas demo.")
@@ -553,7 +678,8 @@ def seed_demo_businesses(db: Session, password: str, *, environment: str,
 
     report = {
         "companies": 0, "branches": 0, "users": 0, "patient_links": 0,
-        "subscriptions": 0, "appointments": 0, "payments": 0,
+        "subscriptions": 0, "subscription_receipts": 0,
+        "appointments": 0, "payments": 0,
         "recipes": 0, "food_records": 0,
     }
     password_hash = get_password_hash(password)
@@ -561,12 +687,15 @@ def seed_demo_businesses(db: Session, password: str, *, environment: str,
         for company in DEMO_COMPANIES:
             tenant = _ensure_tenant(db, company, report)
             branches = _ensure_branches(db, tenant, company, report)
-            _ensure_subscriptions(db, tenant, branches[0], company, report)
             admin = _ensure_admin(db, tenant, branches[0], company, password_hash, report)
+            _ensure_subscriptions(db, tenant, branches[0], company, admin, report)
+            _ensure_subscription_receipts(db, tenant, admin, company, report)
             nutritionists = _ensure_nutritionists(db, tenant, branches, company, password_hash, report)
             _ensure_recipe_catalog(db, tenant, nutritionists[branches[0].id], company, report)
             _ensure_patient_history(db, tenant, branches, admin, nutritionists, company,
                                     password_hash, report)
+        db.flush()
+        report.update(_demo_revenue_summary(db))
         db.commit()
     except Exception:
         db.rollback()

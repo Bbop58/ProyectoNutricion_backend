@@ -31,9 +31,17 @@ def main() -> int:
     finally:
         db.close()
 
-    print("Carga demo completada (número de registros nuevos):")
-    for label, count in counts.items():
-        print(f"  {label}: {count}")
+    count_labels = (
+        "companies", "branches", "users", "patient_links", "subscriptions",
+        "subscription_receipts", "appointments", "payments", "recipes", "food_records",
+    )
+    print("Carga demo completada (registros nuevos):")
+    for label in count_labels:
+        print(f"  {label}: {counts[label]}")
+    print("Ingresos brutos simulados, separados por origen (USD):")
+    print(f"  suscripciones de empresas: {counts['subscription_revenue_usd']:.2f}")
+    print(f"  consultas cobradas en caja: {counts['consultation_revenue_usd']:.2f}")
+    print(f"  total bruto: {counts['gross_revenue_usd']:.2f}")
     return 0
 
 
