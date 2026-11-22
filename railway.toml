@@ -2,7 +2,7 @@
 builder = "nixpacks"
 
 [deploy]
-preDeployCommand = ["python prepare_db.py && python seed_demo_business.py --allow-production"]
+preDeployCommand = ["python prepare_db.py"]
 healthcheckPath = "/health"
 healthcheckTimeout = 60
 startCommand = "python run.py"
