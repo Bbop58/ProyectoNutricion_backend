@@ -58,6 +58,8 @@ class TenantUpdate(BaseModel):
 
 
 class TenantResponse(TenantBase):
+    # Stored demo contacts use reserved .test domains. Keep strict validation on writes.
+    email: Optional[str] = Field(None, description="Correo electrónico de contacto")
     id: str
     created_at: datetime
     updated_at: datetime
