@@ -31,21 +31,13 @@ def ensure_staff(user: User):
 
 def report_user(current_user: User = Depends(get_current_user), db: Session = Depends(get_db),
                 report_client: str = Header('', alias='X-Report-Client')):
-    """Mobile reports deliberately provide the global report catalog to all roles.
-
-    This capability is restricted to this reporting router; it grants no account,
-    clinical editing, payment, or workspace management privileges.
-    """
-    if report_client != 'mobile':
-        return current_user
-    ensure_staff(current_user)
-    from types import SimpleNamespace
+    """Use authorized report scope independently from operational branch selection."""
+    # Reporting can consolidate an administrator's branches without changing
+    # the operational workspace or granting access to other companies.
     from app.core.workspace import Workspace
-    actor = SimpleNamespace(**{c.name: getattr(current_user, c.name) for c in User.__table__.columns})
-    actor.role_id = 'SUPERADMIN'
-    actor._mobile_reports = True
-    db.info['workspace'] = Workspace(current_user.id, None, None, True, True)
-    return actor
+    if current_user.role_id == 'ADMIN_ORGANIZATION':
+        db.info['workspace'] = Workspace(current_user.id, current_user.tenant_id, None, True)
+    return current_user
 
 @router.get("/entities", response_model=List[ReportEntityMeta])
 def get_reportable_entities(

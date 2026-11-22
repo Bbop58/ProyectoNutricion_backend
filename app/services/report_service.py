@@ -161,7 +161,16 @@ class ReportService:
         entity_key=req.entity.lower().strip()
         if entity_key not in cls.ENTITIES_CONFIG: raise ValueError('Entidad de reporte no disponible.')
         req=req.model_copy(update={'entity':entity_key})
-        if req.group_by or req.aggregate or req.metric!='count':return ReportAnalyticsService.query(db,req,current_user)
+        if req.group_by or req.aggregate or req.metric!='count':
+            result = ReportAnalyticsService.query(db,req,current_user)
+            if req.columns:
+                available = {column.key for column in result.columns}
+                if not set(req.columns) <= available:
+                    raise ValueError('El resumen contiene columnas que no están disponibles.')
+                result.columns = [column for column in result.columns if column.key in req.columns]
+                result.rows = [{key: row.get(key) for key in req.columns} for row in result.rows]
+                if 'value' not in req.columns: result.chart = None
+            return result
         conf=cls.ENTITIES_CONFIG[entity_key];all_cols={c['key']:c for c in conf['columns']}
         selected=req.columns or conf['default_columns']
         if any(key not in all_cols for key in selected):raise ValueError('El reporte contiene columnas que no están disponibles.')

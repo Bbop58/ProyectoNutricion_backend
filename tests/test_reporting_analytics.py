@@ -97,7 +97,7 @@ def test_ai_flexible_plan_uses_database_not_fabricated_numbers(client,reporting,
     monkeypatch.setattr(GeminiService,'is_configured',lambda:True)
     monkeypatch.setattr(GeminiService,'generate_json',lambda *a,**k:{'entity':'payments','aggregate':True,'group_by':'payment_method','metric':'count','status':'COMPLETED','explanation':'Invented 999999 clients'})
     response=voice(client,'Desglosa las transacciones según cómo se abonaron','admin');assert response.status_code==200,response.text
-    assert response.json()['report_data']['rows'][0]['value']==1
+    assert response.json()['report_data']['rows'][0]['value']==2
     assert '999999' not in response.text
 
 def test_cross_company_save_export_and_audit_entity(client,db_session,reporting):
@@ -192,7 +192,7 @@ def test_manual_report_supports_all_seven_entities_with_selected_columns(client,
         assert data['total_rows']>0,(entity,data)
         assert [c['key'] for c in data['columns']]==columns
         assert all(set(row)==set(columns) for row in data['rows'])
-        assert all(row['company_name']=='Nutri Norte' and row['branch_name']=='Centro' for row in data['rows'])
+        assert all(row['company_name']=='Nutri Norte' and row['branch_name'] in {'Centro', 'Terminal', 'Parque'} for row in data['rows'])
     for entity,status in [('patients','ACTIVE'),('recipes','ACTIVE'),('appointments','COMPLETED'),('payments','COMPLETED'),('nutritional_plans','APPROVED'),('activity_logs','OPERACIONES')]:
         response=client.post('/api/v1/reports/query',headers=headers('admin'),json={'entity':entity,'status':status})
         assert response.status_code==200 and response.json()['total_rows']>0,(entity,response.text)

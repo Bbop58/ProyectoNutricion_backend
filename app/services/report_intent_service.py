@@ -25,43 +25,8 @@ class ReportIntentService:
 
     @classmethod
     def dates(cls,text):
-        today=cls.today();start=end=None
-        iso=re.findall(r'\b\d{4}-\d{2}-\d{2}\b',text)
-        if iso:
-            try:
-                for value in iso:date.fromisoformat(value)
-            except ValueError:raise BadRequestException('La fecha indicada no existe. Usa YYYY-MM-DD.')
-            return iso[0],iso[-1]
-        if 'anteayer' in text:start=end=today-timedelta(days=2)
-        elif 'ayer' in text:start=end=today-timedelta(days=1)
-        elif contains(text,'hoy'):start=end=today
-        elif 'semana pasada' in text:
-            end=today-timedelta(days=today.weekday()+1);start=end-timedelta(days=6)
-        elif 'esta semana' in text:start=today-timedelta(days=today.weekday());end=today
-        elif 'mes pasado' in text or 'mes anterior' in text:
-            end=today.replace(day=1)-timedelta(days=1);start=end.replace(day=1)
-        elif 'este mes' in text or 'mes actual' in text:start=today.replace(day=1);end=today
-        elif 'ano pasado' in text:start=date(today.year-1,1,1);end=date(today.year-1,12,31)
-        elif 'este ano' in text or 'ano actual' in text:start=date(today.year,1,1);end=today
-        recent=re.search(r'ultim[oa]s?\s+(\d+)\s+(dias?|semanas?|meses?)',text)
-        if recent:
-            amount=int(recent[1])
-            if not 1<=amount<=366:raise BadRequestException('Indica un periodo entre 1 y 366 unidades.')
-            unit=recent[2];end=today
-            if unit.startswith('mes'):
-                index=today.year*12+today.month-1-(amount-1);start=date(index//12,index%12+1,1)
-            else:start=today-timedelta(days=amount*(7 if unit.startswith('semana') else 1)-1)
-        months=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']
-        mentioned=[(text.index(m),i+1) for i,m in enumerate(months) if contains(text,m)]
-        if mentioned:
-            mentioned.sort();years=re.findall(r'\b(20\d{2})\b',text);year=int(years[-1]) if years else today.year
-            first,last=mentioned[0][1],mentioned[-1][1]
-            if last<first:raise BadRequestException('Indica los años del periodo que cruza diciembre; usa fechas YYYY-MM-DD.')
-            start=date(year,first,1);end=date(year,last,calendar.monthrange(year,last)[1])
-        elif not start:
-            years=re.findall(r'\b(20\d{2})\b',text)
-            if len(years)==1:start=date(int(years[0]),1,1);end=date(int(years[0]),12,31)
-        return start.isoformat() if start else None,end.isoformat() if end else None
+        from app.services.report_period_service import report_period
+        return report_period(normalize(text), cls.today())
 
     @classmethod
     def heuristic(cls,text):
@@ -78,7 +43,8 @@ class ReportIntentService:
         analytical=any(w in t for w in ['cuant','cantidad','total','mas ','menos ','compar','ranking','top ','promedio','suma','distribu','por mes','mensual','por empresa','por sucursal','por estado','por especialista','por nutricionista','por metodo','tasa','porcentaje'])
         plan['aggregate']=analytical
         if analytical:
-            if 'sucursal' in t:plan['group_by']='branch'
+            if 'por mes' in t or 'mensual' in t:plan['group_by']='month';plan['sort_by']='month';plan['sort_order']='asc'
+            elif 'por sucursal' in t or ('sucursal' in t and any(w in t for w in ['compar','ranking','mas ','menos '])):plan['group_by']='branch'
             elif 'empresa' in t or 'organizacion' in t:plan['group_by']='company'
             elif 'por mes' in t or 'mensual' in t:plan['group_by']='month';plan['sort_by']='month';plan['sort_order']='asc'
             elif 'por especialista' in t or 'por nutricionista' in t:plan['group_by']='nutritionist'
@@ -91,7 +57,7 @@ class ReportIntentService:
             if entity=='appointments' and ('pacientes' in t or 'clientes' in t):plan['metric']='unique_patients'
         if ('tasa' in t or 'porcentaje' in t) and 'cancel' in t and entity=='appointments':plan['metric']='cancellation_rate';plan['aggregate']=True
         if 'menos ' in t:plan['sort_order']='asc';plan['sort_by']='value' if analytical else None
-        top=re.search(r'(?:top|primer[oa]s?|ultim[oa]s?)\s+(\d+)\b(?!\s+(?:dia|mes|semana))',t)
+        top=re.search(r'(?:top|primer[oa]s?)\s+(\d+)\b(?!\s+(?:dia|mes|semana))',t)
         if top:plan['limit']=min(5000,max(1,int(top[1])))
         if entity=='patients':
             if 'inactiv' in t:plan['status']='Inactivo'
@@ -130,7 +96,8 @@ class ReportIntentService:
             companies,branches=ReportAnalyticsService.scope(db,actor,context)
         if actor.role_id=='SUPERADMIN' and any(p in text for p in ['todas las empresas','todas empresas','entre empresas','multiempresa']):
             context.tenant_id=None;context.tenant_ids=[];companies,branches=ReportAnalyticsService.scope(db,actor,context)
-        branch_matches=[b for b in branches if contains(text,b.name) or (len(b.code)>1 and contains(text,b.code))]
+        branch_matches=[b for b in branches if contains(text,b.name) or (len(b.code)>1 and contains(text,b.code)) or
+                        ('sucursal' in text and contains(text, re.sub(r'^sucursal\s+', '', normalize(b.name))))]
         if branch_matches:
             # Same branch name in multiple companies requires an explicit company.
             for match in branch_matches:
@@ -142,9 +109,9 @@ class ReportIntentService:
             if explicit and not matches:
                 first=explicit[1].split()[0]
                 if first not in {'tiene','tienen','con','que','mas','menos','por','y','o','en','de','del','este','esta','es','genera','genero','registra','registro','obtiene','obtuvo','recibe'}:
-                    raise BadRequestException('No pude identificar la '+dimension+' indicada. Usa su nombre exacto o selecciónala en los filtros.')
+                    raise BadRequestException('No pude identificar la '+dimension+' indicada. Indica su nombre exacto en la consulta.')
         fallback=cls.heuristic(transcript);parsed=None;used_ai=False
-        if GeminiService.is_configured():
+        if GeminiService.is_configured() and not (fallback and fallback.get('aggregate')):
             catalog={key:{'description':conf['label'],'columns':[c['key'] for c in conf['columns']]} for key,conf in service.ENTITIES_CONFIG.items()}
             import json
             prompt=json.dumps({'today':cls.today().isoformat(),'request':transcript,'entities':catalog,'companies':[{'id':c.id,'name':c.name,'code':c.code} for c in companies],'branches':[{'id':b.id,'name':b.name,'company_id':b.tenant_id} for b in branches],'query_schema':ReportQueryRequest.model_json_schema()},ensure_ascii=False)
@@ -168,14 +135,21 @@ class ReportIntentService:
         # Only resolved scope or authorized model scope is allowed; supplied UI context stays explicit.
         parsed['tenant_id']=context.tenant_id
         parsed['tenant_ids']=context.tenant_ids
-        parsed['branch_ids']=context.branch_ids or parsed.get('branch_ids') or []
+        parsed['branch_ids']=context.branch_ids
+        parsed['start_date'], parsed['end_date'] = cls.dates(text)
         if parsed.get('sort_by') and not parsed.get('group_by') and not parsed.get('aggregate'):
             model=service.ENTITIES_CONFIG[parsed['entity']]['model']
             if not hasattr(model,parsed['sort_by']):parsed['sort_by']=None
         try:request=ReportQueryRequest.model_validate(parsed)
         except (ValidationError,TypeError,ValueError):raise BadRequestException('No pude convertir todos los filtros. Indica la métrica y un periodo concreto, por ejemplo «Ingresos por sucursal del 2026-10-01 al 2026-10-29».')
         data=service.query_report_data(db,request,actor)
+        if not data.summary:
+            data.summary = f'{data.total_rows} registros encontrados; se muestran {len(data.rows)}. Periodo: {request.start_date} a {request.end_date}.'
+        parsed_branches = ReportAnalyticsService.scope(db,actor,request)[1]
+        selected_branches = [b for b in parsed_branches if not request.branch_ids or b.id in request.branch_ids]
+        branch_label = ', '.join(b.name for b in selected_branches) if request.branch_ids else 'Todas las sucursales autorizadas'
         scope_names=', '.join(c.name for c in ReportAnalyticsService.scope(db,actor,request)[0]) or 'sin empresas'
         explanation=f"{data.title}. Alcance: {scope_names}. "+('Interpretado con IA; cálculos ejecutados sobre datos reales.' if used_ai else 'Interpretación local; cálculos ejecutados sobre datos reales.')
+        explanation += f' Sucursales: {branch_label}. Periodo: {request.start_date} a {request.end_date} (Bolivia).'
         if data.summary:explanation+=' '+data.summary
         return VoiceReportCommandResponse(parsed_request=request,explanation=explanation,report_data=data)
