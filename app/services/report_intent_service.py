@@ -40,7 +40,13 @@ class ReportIntentService:
         elif any(w in t for w in ['cliente','paciente']):entity='patients'
         else:return None
         plan['entity']=entity
-        analytical=any(w in t for w in ['cuant','cantidad','total','mas ','menos ','compar','ranking','top ','promedio','suma','distribu','por mes','mensual','por empresa','por sucursal','por estado','por especialista','por nutricionista','por metodo','tasa','porcentaje'])
+        explicit_metric = any(w in t for w in ['cuant','cantidad','numero de','total','compar','ranking','top ','promedio','suma','distribu','tasa','porcentaje'])
+        explicit_metric = explicit_metric or bool(re.search(r'\b(?:mas|menos)\s+(?:clientes|pacientes|citas|ingresos|pagos|cobros)\b', t))
+        explicit_metric = explicit_metric or ('unicos' in t and 'por mes' in t)
+        detail = bool(re.search(r'\b(?:mostrar|muestra|muestrame|listado|lista|listar|detalle|detallado|quienes|ver)\b', t))
+        analytical = explicit_metric or (entity == 'payments' and not detail and
+            any(w in t for w in ['ingreso','recaud','factur','dinero']) and
+            any(w in t for w in ['por sucursal','por mes','mensual','por empresa','por estado','por metodo']))
         plan['aggregate']=analytical
         if analytical:
             if 'por mes' in t or 'mensual' in t:plan['group_by']='month';plan['sort_by']='month';plan['sort_order']='asc'
@@ -68,6 +74,8 @@ class ReportIntentService:
                 if word in t:plan['status']=status;break
             if entity=='payments' and not plan.get('status') and (analytical or any(w in t for w in ['ingreso','cobrado','recaud'])):plan['status']='COMPLETED'
         if plan['metric']=='cancellation_rate':plan['status']=None
+        if not analytical and 'por sucursal' in t:
+            plan['sort_by']='branch_name';plan['sort_order']='asc'
         numeric=re.search(r'(mas de|mayor(?:es)? (?:a|que)|menos de|menor(?:es)? (?:a|que))\s+(\d+(?:[.,]\d+)?)',t)
         if numeric:
             field='amount' if entity=='payments' else 'calories' if 'caloria' in t else 'protein' if 'proteina' in t else None
@@ -125,6 +133,13 @@ class ReportIntentService:
         if not parsed:raise BadRequestException('Indica qué dato y comparación necesitas. Ejemplo: «¿Qué sucursal tiene más clientes este mes?» o «Ingresos por empresa en marzo de 2026».')
         # Deterministic fields protect common financial/ranking/date requests from a lossy model plan.
         if fallback:
+            # Naming a dimension organizes details; only metric requests aggregate.
+            if not fallback.get('aggregate'):
+                aggregate_columns = {'value','branch_id','branch_name','company_id','company_name','month','currency'}
+                if parsed.get('aggregate') and parsed.get('columns') and set(parsed['columns']) <= aggregate_columns:
+                    parsed['columns'] = None
+                parsed.update(aggregate=False, group_by=None, metric='count', value_field=None,
+                              sort_by=fallback.get('sort_by'), sort_order=fallback.get('sort_order','desc'))
             for field in ('entity','start_date','end_date','status','currency','filters'):
                 if fallback.get(field) is not None:parsed[field]=fallback[field]
             if fallback.get('aggregate'):
@@ -137,9 +152,12 @@ class ReportIntentService:
         parsed['tenant_ids']=context.tenant_ids
         parsed['branch_ids']=context.branch_ids
         parsed['start_date'], parsed['end_date'] = cls.dates(text)
+        if not parsed.get('aggregate') and parsed.get('sort_by') == 'branch_name':
+            columns = parsed.get('columns') or service.ENTITIES_CONFIG[parsed['entity']]['default_columns']
+            parsed['columns'] = list(dict.fromkeys(['branch_name', *columns]))
         if parsed.get('sort_by') and not parsed.get('group_by') and not parsed.get('aggregate'):
             model=service.ENTITIES_CONFIG[parsed['entity']]['model']
-            if not hasattr(model,parsed['sort_by']):parsed['sort_by']=None
+            if parsed['sort_by'] != 'branch_name' and not hasattr(model,parsed['sort_by']):parsed['sort_by']=None
         try:request=ReportQueryRequest.model_validate(parsed)
         except (ValidationError,TypeError,ValueError):raise BadRequestException('No pude convertir todos los filtros. Indica la métrica y un periodo concreto, por ejemplo «Ingresos por sucursal del 2026-10-01 al 2026-10-29».')
         data=service.query_report_data(db,request,actor)

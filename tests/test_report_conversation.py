@@ -57,3 +57,32 @@ def test_mobile_header_does_not_grant_other_company_access(client, reporting):
     response = client.post('/api/v1/reports/query', headers={**headers('admin'), 'X-Report-Client': 'mobile'},
                            json={'entity': 'patients', 'tenant_ids': ['beta']})
     assert response.status_code == 403
+
+
+def test_show_clients_is_a_branch_ordered_list_not_a_count(client, reporting):
+    result = voice(client, 'Mostrar los clientes registrados desde octubre a noviembre por sucursal.', 'admin')
+    assert result.status_code == 200, result.text
+    payload = result.json()
+    plan, data = payload['parsed_request'], payload['report_data']
+    assert not plan['aggregate'] and plan['group_by'] is None
+    assert plan['start_date'] == '2026-10-01' and plan['end_date'] == '2026-11-30'
+    assert plan['sort_by'] == 'branch_name'
+    assert [row['full_name'] for row in data['rows']] == ['p1', 'p2', 'p3']
+    assert [row['branch_name'] for row in data['rows']] == ['Centro', 'Centro', 'Terminal']
+    assert all('value' not in row for row in data['rows'])
+    counted = voice(client, 'Mostrar la cantidad de clientes registrados desde octubre a noviembre por sucursal.', 'admin')
+    assert counted.status_code == 200, counted.text
+    assert counted.json()['parsed_request']['aggregate']
+    assert sum(row['value'] for row in counted.json()['report_data']['rows']) == 3
+
+
+def test_ai_cannot_turn_a_client_listing_into_counts(client, reporting, monkeypatch):
+    from app.services.gemini_service import GeminiService
+    monkeypatch.setattr(GeminiService, 'is_configured', lambda: True)
+    monkeypatch.setattr(GeminiService, 'generate_json', lambda *args, **kw: {
+        'entity': 'patients', 'aggregate': True, 'group_by': 'branch', 'metric': 'count',
+    })
+    result = voice(client, 'Mostrar clientes por sucursal', 'admin')
+    assert result.status_code == 200, result.text
+    assert not result.json()['parsed_request']['aggregate']
+    assert 'full_name' in result.json()['report_data']['rows'][0]

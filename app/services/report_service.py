@@ -177,8 +177,13 @@ class ReportService:
         q,model,branch_col,dt,companies,branches=ReportAnalyticsService.source(db,current_user,req)
         if model is Recipe and not req.status:q=q.filter(Recipe.is_active.is_(True))
         key=req.sort_by or ('scheduled_at' if model is Appointment else 'created_at')
-        if key not in {c.name for c in model.__table__.columns}:raise ValueError('La columna de orden no está disponible para este reporte.')
-        ordering=getattr(model,key);q=q.order_by(ordering.asc() if req.sort_order=='asc' else ordering.desc(),model.id.asc())
+        if key == 'branch_name':
+            q = q.outerjoin(Branch, model.branch_id == Branch.id)
+            ordering = Branch.name
+        else:
+            if key not in {c.name for c in model.__table__.columns}:raise ValueError('La columna de orden no está disponible para este reporte.')
+            ordering = getattr(model,key)
+        q=q.order_by(ordering.asc() if req.sort_order=='asc' else ordering.desc(),model.id.asc())
         total=q.order_by(None).count();items=q.limit(req.limit or 500).all()
         names={c.id:c.name for c in companies};branch_names={b.id:b.name for b in branches}
         ids={getattr(item,k,None) for item in items for k in ('patient_id','nutritionist_id','created_by','user_id')}
