@@ -29,8 +29,21 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr = Field(..., description="Correo electrónico registrado")
+    # Login accepts reserved .test addresses used by seeded demo accounts.
+    # Registration and password-reset requests continue to require EmailStr.
+    email: str = Field(
+        ...,
+        min_length=3,
+        max_length=320,
+        pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$",
+        description="Correo electrónico registrado",
+    )
     password: str = Field(..., min_length=1, description="Contraseña de acceso")
+
+    @field_validator("email")
+    @classmethod
+    def normalize_login_email(cls, value: str) -> str:
+        return value.strip().lower()
 
 
 class TokenResponse(BaseModel):

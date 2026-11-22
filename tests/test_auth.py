@@ -1,4 +1,14 @@
 import pytest
+from app.schemas.auth import LoginRequest
+
+
+def test_login_request_accepts_seeded_demo_email():
+    request = LoginRequest(
+        email="admin.nutrifit@example.test",
+        password="0JyD3nNqfgjVpr0zk4XiO9bbsLc4D2lC",
+    )
+
+    assert request.email == "admin.nutrifit@example.test"
 
 
 def test_register_user_success(client):
