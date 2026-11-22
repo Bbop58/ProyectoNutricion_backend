@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str | None = None
     EMAILS_FROM_EMAIL: str = "soporte@nutrisalud.com"
     EMAILS_FROM_NAME: str = "NutriSalud"
+    BREVO_API_KEY: str = ""
 
     # PayPal Sandbox
     PAYPAL_CLIENT_ID: str = ""

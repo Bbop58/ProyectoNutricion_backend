@@ -2,6 +2,7 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import logging
+import httpx
 from app.config import settings
 
 logger = logging.getLogger("email_service")
@@ -135,13 +136,44 @@ class EmailService:
 </html>
 """
 
-        # Log details to console / logger for development visibility
-        logger.info("=" * 65)
-        logger.info(f"📧 [EMAIL DE RECUPERACIÓN - NUTRISALUD]")
-        logger.info(f"Para: {to_email}")
-        logger.info(f"Enlace de restablecimiento: {reset_link}")
-        logger.info(f"Token (10 min de vigencia): {reset_token}")
-        logger.info("=" * 65)
+        text_content = (
+            "Recupera tu contraseña en NutriSalud:\n\n"
+            f"Enlace: {reset_link}\n\n"
+            f"Token: {reset_token}\n\n"
+            "Válido por 10 minutos."
+        )
+
+        if settings.BREVO_API_KEY:
+            try:
+                response = httpx.post(
+                    "https://api.brevo.com/v3/smtp/email",
+                    headers={
+                        "api-key": settings.BREVO_API_KEY,
+                        "accept": "application/json",
+                    },
+                    json={
+                        "sender": {
+                            "name": settings.EMAILS_FROM_NAME,
+                            "email": settings.EMAILS_FROM_EMAIL,
+                        },
+                        "to": [{"email": to_email}],
+                        "subject": subject,
+                        "htmlContent": html_content,
+                        "textContent": text_content,
+                    },
+                    timeout=20.0,
+                )
+                if response.status_code in (200, 201, 202):
+                    logger.info("Password-reset email sent through Brevo")
+                    return True
+                logger.error(
+                    "Brevo password-reset delivery failed (HTTP %s)",
+                    response.status_code,
+                )
+                return False
+            except httpx.HTTPError:
+                logger.error("Brevo password-reset request failed")
+                return False
 
         # If SMTP settings are configured, deliver via SMTP
         if settings.SMTP_HOST and settings.SMTP_USER and settings.SMTP_PASSWORD:
@@ -151,7 +183,6 @@ class EmailService:
                 msg["From"] = f"{settings.EMAILS_FROM_NAME} <{settings.EMAILS_FROM_EMAIL}>"
                 msg["To"] = to_email
 
-                text_content = f"Recupera tu contraseña en NutriSalud:\n\nEnlace: {reset_link}\n\nToken: {reset_token}\n\nVálido por 10 minutos."
                 msg.attach(MIMEText(text_content, "plain"))
                 msg.attach(MIMEText(html_content, "html"))
 
@@ -159,11 +190,11 @@ class EmailService:
                     server.starttls()
                     server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
                     server.sendmail(settings.EMAILS_FROM_EMAIL, to_email, msg.as_string())
-                logger.info(f"✅ Correo enviado exitosamente vía SMTP a {to_email}")
+                logger.info("Password-reset email sent through SMTP")
                 return True
-            except Exception as e:
-                logger.error(f"❌ Error al enviar correo vía SMTP: {e}")
+            except Exception:
+                logger.error("SMTP password-reset delivery failed")
                 return False
 
-        # In development without SMTP, return True so the flow succeeds and logs the token
-        return True
+        logger.warning("Password-reset email provider is not configured")
+        return False
