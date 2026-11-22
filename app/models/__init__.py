@@ -70,3 +70,4 @@ import app.services.audit_policy  # register business mutation auditing
 import app.core.workspace  # register operational ownership and request scoping
 
 import app.services.push_service  # deliver newly committed notifications through FCM
+from app.models.care import Measurement, NutritionConfiguration, CareAssessment, PlanReview, CareMessage, PatientImportBatch, PlatformIncident

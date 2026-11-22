@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date, time
 from decimal import Decimal
 from typing import Literal
 from fastapi import APIRouter, Depends, Query
@@ -57,14 +57,30 @@ def company_dict(db, row):
 
 
 @router.get('/overview')
-def overview(user=Depends(platform_user), db: Session=Depends(get_db)):
-    companies = db.query(Tenant).all()
-    subscriptions = db.query(Subscription).filter(Subscription.tenant_id.isnot(None),
-        ~Subscription.plan_name.like('CLIENTE_%')).all()
+def overview(user=Depends(platform_user), db: Session=Depends(get_db), tenant_id:str|None=None, start_date:date|None=None, end_date:date|None=None):
+    if start_date and end_date and start_date>end_date: raise BadRequestException('Revisa el período de consulta.')
+    company_query=db.query(Tenant)
+    subscription_query=db.query(Subscription).filter(Subscription.tenant_id.isnot(None),~Subscription.plan_name.like('CLIENTE_%'))
+    if tenant_id:
+        company_query=company_query.filter(Tenant.id==tenant_id)
+        subscription_query=subscription_query.filter(Subscription.tenant_id==tenant_id)
+    # Creation-period filters; active/inactive always reflects the current state.
+    if start_date:
+        lower=datetime.combine(start_date,time.min)+timedelta(hours=4)
+        company_query=company_query.filter(Tenant.created_at>=lower)
+        subscription_query=subscription_query.filter(Subscription.created_at>=lower)
+    if end_date:
+        upper=datetime.combine(end_date+timedelta(days=1),time.min)+timedelta(hours=4)
+        company_query=company_query.filter(Tenant.created_at<upper)
+        subscription_query=subscription_query.filter(Subscription.created_at<upper)
+    companies=company_query.all()
+    subscriptions=subscription_query.all()
     active = [s for s in subscriptions if s.status == 'ACTIVE' and s.expires_at and s.expires_at > now()]
     return dict(companies=len(companies), active_companies=sum(c.is_active for c in companies),
         inactive_companies=sum(not c.is_active for c in companies), active_subscriptions=len(active),
-        expiring_subscriptions=sum(s.expires_at <= now() + timedelta(days=7) for s in active))
+        expiring_subscriptions=sum(s.expires_at <= now() + timedelta(days=7) for s in active),
+        generated_at=now().isoformat()+'Z',start_date=start_date,end_date=end_date,
+        explanation='El período filtra altas de empresas y suscripciones (horario Bolivia). Los estados son actuales; no representan una reconstrucción histórica.')
 
 
 @router.get('/companies')
@@ -217,3 +233,26 @@ def history(offset: int=Query(0, ge=0), limit: int=Query(50, ge=1, le=100),
             actor_name=actor.full_name if actor else 'Administrador',
             reason=r.reason, before=r.before, after=r.after, created_at=r.created_at))
     return dict(total=query.count(), items=items)
+
+
+@router.get('/incidents')
+def incidents(start_date:date|None=None,end_date:date|None=None,user=Depends(platform_user),db:Session=Depends(get_db)):
+    from app.models.care import PlatformIncident
+    if start_date and end_date and start_date>end_date: raise BadRequestException('Revisa el período.')
+    query=db.query(PlatformIncident)
+    if start_date: query=query.filter(PlatformIncident.created_at>=datetime.combine(start_date,time.min)+timedelta(hours=4))
+    if end_date: query=query.filter(PlatformIncident.created_at<datetime.combine(end_date+timedelta(days=1),time.min)+timedelta(hours=4))
+    return [dict(id=r.id,method=r.method,route=r.route,error_type=r.error_type,status=r.status,resolution=r.resolution,
+        created_at=r.created_at.isoformat()+'Z',resolved_at=r.resolved_at.isoformat()+'Z' if r.resolved_at else None)
+        for r in query.order_by(PlatformIncident.created_at.desc()).limit(100).all()]
+
+
+@router.put('/incidents/{identity}/resolve')
+def resolve_incident(identity:str,body:StatusChange,user=Depends(platform_user),db:Session=Depends(get_db)):
+    from app.models.care import PlatformIncident
+    row=db.get(PlatformIncident,identity)
+    if not row: raise NotFoundException('Incidencia no encontrada.')
+    row.status='RESOLVED';row.resolution=body.reason;row.resolved_by=user.id;row.resolved_at=now()
+    audit(db,user,'INCIDENCIA_RESUELTA',row.id,body.reason)
+    db.commit()
+    return {'message':'Incidencia resuelta.'}

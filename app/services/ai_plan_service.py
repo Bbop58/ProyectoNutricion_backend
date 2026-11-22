@@ -153,6 +153,9 @@ class AIPlanService:
         plan = db.query(NutritionalPlan).filter(NutritionalPlan.id == plan_id).first()
         if not plan:
             raise ValueError("Plan nutricional no encontrado.")
+        before_review = {'status': plan.status, 'clinical_notes': plan.clinical_notes, 'title': plan.title,
+            'daily_calories': plan.daily_calories, 'protein_g': plan.protein_g, 'carbs_g': plan.carbs_g,
+            'fats_g': plan.fats_g, 'meals_json': plan.meals_json}
 
         if title is not None:
             plan.title = title
@@ -169,6 +172,14 @@ class AIPlanService:
             plan.meals_per_day = len(meals)
         if clinical_notes is not None:
             plan.clinical_notes = clinical_notes
+        after_review = {'status': status if status and status != 'APPROVED' else plan.status,
+            'clinical_notes': plan.clinical_notes, 'title': plan.title, 'daily_calories': plan.daily_calories,
+            'protein_g': plan.protein_g, 'carbs_g': plan.carbs_g, 'fats_g': plan.fats_g, 'meals_json': plan.meals_json}
+        if before_review != after_review and (approved_by or plan.nutritionist_id):
+            from app.models.care import PlanReview
+            db.add(PlanReview(tenant_id=plan.tenant_id, plan_id=plan.id, actor_id=approved_by or plan.nutritionist_id,
+                decision='REJECTED' if status == 'REJECTED' else 'CORRECTED', reason='Edición profesional desde el editor de planes.',
+                before=before_review, after=after_review))
         if status is not None:
             if status == "APPROVED":
                 return cls.approve_plan(db, plan_id, approved_by or plan.nutritionist_id)
@@ -186,6 +197,8 @@ class AIPlanService:
         nutritionist_id: str,
     ) -> NutritionalPlanResponse:
         """Aprueba un borrador y archiva planes anteriores activos."""
+        from app.models.care import PlanReview
+        has_pending_review = any(isinstance(r, PlanReview) and r.plan_id == plan_id and r.decision == 'APPROVED' for r in db.new)
         plan = db.query(NutritionalPlan).filter(NutritionalPlan.id == plan_id).first()
         if not plan:
             raise ValueError("Plan nutricional no encontrado.")
@@ -197,6 +210,8 @@ class AIPlanService:
         if plan.status == 'APPROVED':
             db.commit()
             return cls._format_plan_response(plan)
+        if plan.status != 'DRAFT':
+            raise ValueError('Solo se puede aprobar un borrador pendiente de revisión.')
         if not nutritionist_id:
             raise ValueError('La aprobación requiere un profesional responsable.')
         if not json.loads(plan.meals_json or '[]'):
@@ -208,6 +223,11 @@ class AIPlanService:
         ).all():
             previous.status = "ARCHIVED"
 
+        if not has_pending_review:
+            db.add(PlanReview(tenant_id=plan.tenant_id,plan_id=plan.id,actor_id=nutritionist_id,decision='APPROVED',
+                reason='Aprobación profesional desde el editor de planes.',
+                before={'status':plan.status,'clinical_notes':plan.clinical_notes},
+                after={'status':'APPROVED','clinical_notes':plan.clinical_notes}))
         plan.status = "APPROVED"
         plan.nutritionist_id = nutritionist_id
         plan.approved_at = datetime.now(timezone.utc)

@@ -67,6 +67,9 @@ def save_my_anamnesis(
         category="CLINICAL",
     )
     db.add(log)
+    from app.services.care_service import capture_anamnesis
+    if payload.get('weight_kg') is not None and payload.get('height_cm') is not None:
+        capture_anamnesis(db, anamnesis, current_user)
     db.commit()
     db.refresh(anamnesis)
     return anamnesis

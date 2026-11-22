@@ -30,6 +30,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 async def general_exception_handler(request: Request, exc: Exception):
     """Global fallback exception handler."""
     logger.error(f"Unhandled error processing {request.method} {request.url}: {exc}", exc_info=True)
+    from fastapi.concurrency import run_in_threadpool
+    from app.services.platform_incident_service import record_incident
+    await run_in_threadpool(record_incident, request, exc)
 
     if isinstance(exc, SQLAlchemyError):
         return JSONResponse(

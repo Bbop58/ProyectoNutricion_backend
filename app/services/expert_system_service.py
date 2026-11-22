@@ -209,6 +209,12 @@ class ExpertSystemService:
         # Obtener parámetros configurados o usar valores por defecto clínicos
         params = db.query(HabitParameter).all()
         param_map = {p.habit: (p.operator, p.value, p.unit) for p in params}
+        if getattr(anamnesis, 'tenant_id', None):
+            from app.services.care_service import configuration
+            cfg = configuration(db, anamnesis.tenant_id)
+            if cfg['version']:
+                param_map.update({'AGUA': ('>=', cfg['values']['water_liters'], 'L'),
+                    'SUENO': ('>=', cfg['values']['sleep_hours'], 'horas')})
 
         default_rules = {
             "AGUA": (">=", 2.0, "L"),
