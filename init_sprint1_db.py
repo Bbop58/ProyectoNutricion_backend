@@ -14,6 +14,34 @@ from app.models.notification import Notification
 from app.models.backup import BackupSetting, BackupLog
 from app.models.clinical import PatientAnamnesis
 from app.models.subscription import Subscription
+from app.models.company import Branch, CompanyAdministrator
+
+
+def ensure_sample_tenant_primary_branch(db, sample_tenant):
+    """Keep the built-in sample clinic selectable in public registration."""
+    if not sample_tenant.department_code:
+        sample_tenant.department_code = "07"  # Santa Cruz
+    branch = db.query(Branch).filter_by(tenant_id=sample_tenant.id, code="PRINCIPAL").first()
+    if not branch:
+        branch = Branch(
+            tenant_id=sample_tenant.id,
+            name="Sucursal principal",
+            code="PRINCIPAL",
+            address=sample_tenant.address,
+            province_code="0701",
+            municipality_code="070101",
+            is_active=True,
+        )
+        db.add(branch)
+        db.flush()
+    else:
+        if not branch.address:
+            branch.address = sample_tenant.address
+        if not branch.province_code:
+            branch.province_code = "0701"
+        if not branch.municipality_code:
+            branch.municipality_code = "070101"
+    return branch
 
 
 def init_db(seed_demo=False):
@@ -124,13 +152,18 @@ def init_db(seed_demo=False):
                 phone="+591 73683564",
                 email="contacto@vidasana.nutricion.com",
                 address="Av. San Martín #450, Santa Cruz, Bolivia",
+                department_code="07",
                 description="Centro especializado en nutrición clínica y deportiva.",
                 is_active=True,
+                created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
             )
             db.add(sample_tenant)
             db.commit()
             db.refresh(sample_tenant)
             print("Sample tenant 'VIDASANA' created.")
+
+        sample_branch = ensure_sample_tenant_primary_branch(db, sample_tenant)
+        db.commit()
 
         # Seed Demo Accounts for CU testing and QA evaluation
         demo_accounts = [
@@ -150,6 +183,7 @@ def init_db(seed_demo=False):
                     full_name=name,
                     role_id=role,
                     tenant_id=tenant_id,
+                    branch_id=(sample_branch.id if tenant_id == sample_tenant.id else None),
                     is_active=True,
                 )
                 db.add(user)
@@ -158,10 +192,16 @@ def init_db(seed_demo=False):
                 user.role_id = role
                 if tenant_id and not user.tenant_id:
                     user.tenant_id = tenant_id
+                if tenant_id == sample_tenant.id and not user.branch_id:
+                    user.branch_id = sample_branch.id
                 user.is_active = True
             db.commit()
             db.refresh(user)
             seeded_users[role] = user
+
+        if not db.query(CompanyAdministrator).filter_by(tenant_id=sample_tenant.id).first():
+            db.add(CompanyAdministrator(tenant_id=sample_tenant.id, user_id=seeded_users["ADMIN_ORGANIZATION"].id))
+            db.commit()
 
         # Ensure Client is linked to Nutritionist
         if "CLIENTE" in seeded_users and "NUTRICIONISTA" in seeded_users:

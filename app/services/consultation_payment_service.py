@@ -12,6 +12,8 @@ from app.services.paypal_service import PayPalService
 
 
 class ConsultationPaymentService:
+    CONSULTATION_FEE_USD = 5.0
+
     @staticmethod
     def ensure_charge(db, appointment):
         charge = db.query(Payment).filter_by(appointment_id=appointment.id).first()
@@ -22,7 +24,7 @@ class ConsultationPaymentService:
                          branch_id=appointment.branch_id, patient_id=patient.id,
                          appointment_id=appointment.id, purpose='CONSULTATION',
                          customer_name=patient.full_name, customer_email=patient.email,
-                         concept='Consulta general', amount=5, currency='USD',
+                         concept='Consulta general', amount=ConsultationPaymentService.CONSULTATION_FEE_USD, currency='USD',
                          status='PENDING', payment_method='PENDING')
         db.add(charge)
         db.flush()
@@ -125,7 +127,7 @@ class ConsultationPaymentService:
                     db.add(Notification(user_id=recipient.id, tenant_id=appointment.tenant_id,
                         branch_id=appointment.branch_id, title='Pago presencial pendiente',
                         type='SISTEMA', reference_id=appointment.id,
-                        message=f'{payment.customer_name} pagará USD 5 de su consulta general en caja.'))
+                        message=f'{payment.customer_name} pagará USD {ConsultationPaymentService.CONSULTATION_FEE_USD:.0f} de su consulta general en caja.'))
             payment.payment_method = method
             db.commit()
             return {'payment_id': payment.id, 'status': 'PENDING', 'payment_preference': method}
@@ -137,10 +139,11 @@ class ConsultationPaymentService:
             return ConsultationPaymentService.checkout(db, payment, return_url)
         if method == 'WALLET':
             db.query(User).filter_by(id=user.id).with_for_update(of=User).one()
-            if ConsultationPaymentService.balance(db, user.id) < Decimal('5'):
+            fee = Decimal(str(ConsultationPaymentService.CONSULTATION_FEE_USD))
+            if ConsultationPaymentService.balance(db, user.id) < fee:
                 raise HTTPException(400, detail='Saldo insuficiente. Recarga tu wallet desde Perfil.')
             db.add(WalletMovement(user_id=user.id, tenant_id=payment.tenant_id, branch_id=payment.branch_id,
-                payment_id=payment.id, amount=Decimal('-5'), concept='Pago de consulta general con wallet'))
+                payment_id=payment.id, amount=-fee, concept='Pago de consulta general con wallet'))
         else:
             payment.cashier_id = user.id
         payment.payment_method = method
@@ -187,7 +190,7 @@ class ConsultationPaymentService:
             from app.models.notification import Notification
             db.add(Notification(user_id=payment.patient_id, tenant_id=payment.tenant_id,
                 branch_id=payment.branch_id, title='Cita confirmada', type='CITA_CONFIRMADA',
-                reference_id=appointment.id, message=f'Pago de consulta general: USD 5.00 con {payment.payment_method}. Tu cita está confirmada. Puedes ver el recibo en tus comprobantes.'))
+                reference_id=appointment.id, message=f'Pago de consulta general: USD {ConsultationPaymentService.CONSULTATION_FEE_USD:.2f} con {payment.payment_method}. Tu cita está confirmada. Puedes ver el recibo en tus comprobantes.'))
         if payment.purpose == 'WALLET_TOPUP':
             from app.models.notification import Notification
             db.add(Notification(user_id=payment.patient_id, tenant_id=payment.tenant_id,
