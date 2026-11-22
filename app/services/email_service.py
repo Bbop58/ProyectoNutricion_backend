@@ -10,6 +10,31 @@ logger = logging.getLogger("email_service")
 
 class EmailService:
     @staticmethod
+    def send_documents(to_email: str, attachments: list[tuple[str, bytes]]) -> bool:
+        import base64
+        if not settings.BREVO_API_KEY:
+            logger.error('Brevo document delivery is not configured')
+            return False
+        try:
+            response = httpx.post('https://api.brevo.com/v3/smtp/email',
+                headers={'api-key': settings.BREVO_API_KEY, 'accept': 'application/json'},
+                json={
+                    'sender': {'name': settings.EMAILS_FROM_NAME, 'email': settings.EMAILS_FROM_EMAIL},
+                    'to': [{'email': to_email}],
+                    'subject': 'Tus documentos - NutriSalud',
+                    'textContent': 'Adjuntamos los documentos que solicitaste en NutriSalud.',
+                    'htmlContent': '<p>Adjuntamos los documentos que solicitaste en <strong>NutriSalud</strong>.</p>',
+                    'attachment': [{'name': name, 'content': base64.b64encode(data).decode('ascii')}
+                                   for name, data in attachments],
+                }, timeout=30.0)
+            if response.status_code in (200, 201, 202):
+                return True
+            logger.error('Brevo document delivery failed (HTTP %s)', response.status_code)
+        except httpx.HTTPError:
+            logger.error('Brevo document delivery request failed')
+        return False
+
+    @staticmethod
     def send_password_reset_email(to_email: str, reset_token: str) -> bool:
         """Send a password reset email with a 10-minute expiration token."""
         reset_link = f"{settings.FRONTEND_URL}/reset-password?token={reset_token}"
