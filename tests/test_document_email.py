@@ -20,6 +20,7 @@ def test_edited_recipient_and_document_permissions(client, db_session, platform,
     assert db_session.get(__import__('app.models.user',fromlist=['User']).User,'patient').email == 'patient@example.com'
     assert client.post('/api/v1/documents/email',headers=headers('other'),json=body).status_code in (403,404)
     assert client.post('/api/v1/platform/documents/email',headers=headers(),json=body).status_code == 403
+    assert client.post('/api/v1/platform/documents/email',headers=headers('patient'),json=body).status_code == 403
     assert len(sent)==1
     for path in ['https://example.com/a.pdf','/backup/download','//example.com/a','/reports/mine/export?file_format=zip']:
         assert client.post('/api/v1/documents/email',headers=headers('admin'),json={**body,'paths':[path]}).status_code == 422

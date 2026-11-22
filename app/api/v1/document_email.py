@@ -1,7 +1,7 @@
 """Email existing authorized downloads; never accept arbitrary URLs or attachments."""
 import re
 from urllib.parse import urlsplit, parse_qs
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
@@ -83,7 +83,9 @@ def resolve_download(path, report_request, user, db):
 
 @router.post('/documents/email')
 @router.post('/platform/documents/email')
-async def email_documents(body: DocumentEmailRequest, user=Depends(get_current_user), db: Session=Depends(get_db)):
+async def email_documents(body: DocumentEmailRequest, request: Request, user=Depends(get_current_user), db: Session=Depends(get_db)):
+    if request.url.path.startswith('/api/v1/platform/') and user.role_id != 'SUPERADMIN':
+        raise HTTPException(403, 'No tienes acceso a la plataforma.')
     attachments = []
     total = 0
     for path in dict.fromkeys(body.paths):
