@@ -33,6 +33,9 @@ def test_admin_consolidates_and_exports_only_own_branches(client, reporting):
     data = result.json()
     assert data['parsed_request']['start_date'] == '2026-01-01'
     assert sum(row['value'] for row in data['report_data']['rows']) == 90
+    recent = voice(client, 'Ingresos por sucursal ultimos tres meses', 'admin')
+    assert recent.status_code == 200, recent.text
+    assert recent.json()['parsed_request']['start_date'] == '2026-07-29'
     only = voice(client, 'Ingresos de sucursal Terminal', 'admin')
     assert only.status_code == 200, only.text
     assert only.json()['parsed_request']['branch_ids'] == ['a2']

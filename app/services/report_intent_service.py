@@ -108,7 +108,7 @@ class ReportIntentService:
             explicit=re.search(r'\b'+dimension+r'\s+(?:llamada\s+)?([a-z0-9][a-z0-9 ]*)',text)
             if explicit and not matches:
                 first=explicit[1].split()[0]
-                if first not in {'tiene','tienen','con','que','mas','menos','por','y','o','en','de','del','este','esta','es','genera','genero','registra','registro','obtiene','obtuvo','recibe'}:
+                if first not in {'ultimos','ultimas','durante','entre','desde','hasta','el','la','los','las','todas','todos','cada','al','tiene','tienen','con','que','mas','menos','por','y','o','en','de','del','este','esta','es','genera','genero','registra','registro','obtiene','obtuvo','recibe'}:
                     raise BadRequestException('No pude identificar la '+dimension+' indicada. Indica su nombre exacto en la consulta.')
         fallback=cls.heuristic(transcript);parsed=None;used_ai=False
         if GeminiService.is_configured() and not (fallback and fallback.get('aggregate')):
