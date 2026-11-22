@@ -1,7 +1,7 @@
 from app.models.workspace import WorkspaceOwned
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, DateTime, Float, ForeignKey, String
+from sqlalchemy import Column, DateTime, Float, ForeignKey, String, JSON
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -13,6 +13,8 @@ class Subscription(WorkspaceOwned, Base):
     tenant_id = Column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=True, index=True)
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     plan_name = Column(String(50), nullable=False)  # BASICO, PROFESIONAL, PREMIUM, CLIENTE_FREE, CLIENTE_PREMIUM
+    plan_snapshot = Column(JSON, nullable=True)
+    source = Column(String(20), nullable=False, default='PAYPAL')
     paypal_order_id = Column(String(100), nullable=True, index=True)
     paypal_capture_id = Column(String(100), nullable=True)
     status = Column(String(20), default="PENDING", nullable=False)  # PENDING, ACTIVE, CANCELLED, EXPIRED

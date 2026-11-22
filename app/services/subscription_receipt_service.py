@@ -57,7 +57,8 @@ class SubscriptionReceiptService:
             story += [p("PAYPAL SANDBOX - PAGO DE PRUEBA. No acredita un cobro de dinero real.", "Heading3")]
         story += [Spacer(1, 14), p("Datos del comprador", "Heading3"), p(receipt.buyer_name), p(receipt.buyer_email),
                   Spacer(1, 10)]
-        description = "Suscripción Premium IA - 30 días" if receipt.plan_name == "CLIENTE_PREMIUM" else f"Suscripción {receipt.plan_name} - 30 días"
+        days = max(1, (receipt.expires_at - receipt.paid_at).days) if receipt.expires_at else 30
+        description = f"Suscripción Premium IA - {days} días" if receipt.plan_name == "CLIENTE_PREMIUM" else f"Suscripción {receipt.plan_name} - {days} días"
         rows = [[p("Concepto"), p("Importe")], [p(description), p(f"{receipt.amount:.2f} {receipt.currency}")],
                 [p("TOTAL PAGADO"), p(f"{receipt.amount:.2f} {receipt.currency}")]]
         table = Table(rows, colWidths=[365, 145], hAlign="LEFT")

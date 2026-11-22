@@ -24,6 +24,9 @@ class UserService:
         phone_val = getattr(obj_in, "phone", None)
         tenant_id_val = getattr(obj_in, "tenant_id", None)
         obj_role = getattr(obj_in, "role_id", None)
+        if (role_id or obj_role or 'CLIENTE') == 'CLIENTE':
+            from app.services.commercial_plan_service import check_capacity
+            check_capacity(db, tenant_id_val, 'patients')
         db_obj = User(
             email=obj_in.email.lower().strip(),
             hashed_password=get_password_hash(obj_in.password),
@@ -55,6 +58,9 @@ class UserService:
             db_obj.hashed_password = get_password_hash(obj_in.password)
             db_obj.session_version = (db_obj.session_version or 0) + 1
         if obj_in.role_id is not None:
+            if obj_in.role_id == 'CLIENTE' and db_obj.role_id != 'CLIENTE':
+                from app.services.commercial_plan_service import check_capacity
+                check_capacity(db, db_obj.tenant_id, 'patients')
             db_obj.role_id = obj_in.role_id
         if obj_in.tenant_id is not None:
             db_obj.tenant_id = obj_in.tenant_id

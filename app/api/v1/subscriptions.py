@@ -36,9 +36,9 @@ router = APIRouter(prefix="/subscriptions", tags=["Subscriptions"])
 #  Public — list available plans
 # ------------------------------------------------------------------ #
 @router.get("/plans", response_model=List[SubscriptionPlanOut])
-def list_plans():
+def list_plans(db: Session = Depends(get_db)):
     """Return the catalogue of subscription plans (no auth required)."""
-    return SubscriptionService.get_plans()
+    return SubscriptionService.get_plans(db)
 
 
 # ------------------------------------------------------------------ #
@@ -109,6 +109,8 @@ def create_order(
             order_id=result["order_id"],
             approval_url=result["approval_url"],
         )
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

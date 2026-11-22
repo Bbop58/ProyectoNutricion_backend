@@ -116,10 +116,12 @@ class SubscriptionService:
     #  Read plans
     # ------------------------------------------------------------------ #
     @staticmethod
-    def get_plans() -> List[SubscriptionPlanOut]:
+    def get_plans(db=None) -> List[SubscriptionPlanOut]:
         """Return all available subscription plans."""
         result: List[SubscriptionPlanOut] = []
-        for name, info in PLANS.items():
+        from app.services.commercial_plan_service import catalog
+        plans = catalog(db) if db is not None else PLANS
+        for name, info in plans.items():
             result.append(
                 SubscriptionPlanOut(
                     name=name,
@@ -128,7 +130,9 @@ class SubscriptionService:
                     currency=info["currency"],
                     period=info["period"],
                     max_patients=info["max_patients"],
-                    recommended=info["recommended"],
+                    recommended=info.get("recommended", False),
+                    max_branches=info.get("max_branches"),
+                    duration_days=info.get("duration_days", 30),
                     features=[PlanFeature(**f) for f in info["features"]],
                 )
             )
@@ -147,10 +151,15 @@ class SubscriptionService:
     ) -> dict:
         """Create a PayPal order and a PENDING subscription row."""
         plan_name_upper = plan_name.upper()
-        if plan_name_upper not in PLANS:
+        from app.services.commercial_plan_service import catalog
+        available_plans = catalog(db)
+        if plan_name_upper not in available_plans:
             raise ValueError(f"Plan '{plan_name}' no existe. Opciones: {list(PLANS.keys())}")
 
-        plan = PLANS[plan_name_upper]
+        plan = available_plans[plan_name_upper]
+        if not plan_name_upper.startswith('CLIENTE_'):
+            from app.services.commercial_plan_service import check_plan_fit
+            check_plan_fit(db, tenant_id, plan)
 
         # Build return URL — Para suscripciones móviles o CLIENTE_PREMIUM redirigir al resumen de cuenta PayPal Sandbox
         if plan_name_upper == "CLIENTE_PREMIUM" or not tenant_id:
@@ -168,7 +177,7 @@ class SubscriptionService:
         paypal_result = PayPalService.create_order(
             amount=plan["price"],
             currency=plan["currency"],
-            description=f"NutriSalud — Plan {plan['display_name']} (1 Mes)",
+            description=f"NutriSalud — Plan {plan['display_name']} ({plan.get('duration_days', 30)} días)",
             return_url=return_url,
             cancel_url=cancel_url,
         )
@@ -178,6 +187,8 @@ class SubscriptionService:
             tenant_id=None if plan_name_upper == "CLIENTE_PREMIUM" else tenant_id,
             user_id=user_id,
             plan_name=plan_name_upper,
+            plan_snapshot=plan,
+            source="PAYPAL",
             paypal_order_id=paypal_result["order_id"],
             status="PENDING",
             amount=plan["price"],
@@ -252,7 +263,7 @@ class SubscriptionService:
         subscription.paypal_capture_id = capture_result.get("capture_id")  # type: ignore[assignment]
         subscription.status = "ACTIVE"  # type: ignore[assignment]
         subscription.started_at = now  # type: ignore[assignment]
-        subscription.expires_at = now + timedelta(days=30)  # type: ignore[assignment]
+        subscription.expires_at = now + timedelta(days=(subscription.plan_snapshot or {}).get("duration_days", 30))  # type: ignore[assignment]
         SubscriptionReceiptService.issue(db, subscription)
         db.commit()
         db.refresh(subscription)
@@ -350,7 +361,7 @@ class SubscriptionService:
         subscription.status = "ACTIVE"
         subscription.paypal_capture_id = capture["id"]
         subscription.started_at = now
-        subscription.expires_at = now + timedelta(days=30)
+        subscription.expires_at = now + timedelta(days=(subscription.plan_snapshot or {}).get("duration_days", 30))
         SubscriptionReceiptService.issue(db, subscription)
         db.commit()
         db.refresh(subscription)

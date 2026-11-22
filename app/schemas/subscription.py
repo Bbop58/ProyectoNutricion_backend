@@ -17,6 +17,8 @@ class SubscriptionPlanOut(BaseModel):
     max_patients: int | None
     features: List[PlanFeature]
     recommended: bool = False
+    max_branches: int | None = None
+    duration_days: int = 30
 
 
 class CreateOrderRequest(BaseModel):

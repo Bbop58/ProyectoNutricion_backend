@@ -79,6 +79,13 @@ class AuthService:
         if not user.is_active:
             raise AuthException(detail="Inactive user account")
 
+        if user.role_id != 'SUPERADMIN' and user.tenant_id:
+            from app.models.tenant import Tenant
+            from app.core.exceptions import ForbiddenException
+            company = db.get(Tenant, user.tenant_id)
+            if company and not company.is_active:
+                raise ForbiddenException('La empresa está suspendida. Contacta al administrador de la plataforma.')
+
         return user
 
     @classmethod
@@ -115,6 +122,13 @@ class AuthService:
             raise AuthException(detail="Refresh token has been revoked")
         if not user or not user.is_active:
             raise AuthException(detail="User not found or inactive")
+
+        if user.role_id != 'SUPERADMIN' and user.tenant_id:
+            from app.models.tenant import Tenant
+            from app.core.exceptions import ForbiddenException
+            company = db.get(Tenant, user.tenant_id)
+            if company and not company.is_active:
+                raise ForbiddenException('La empresa está suspendida.')
 
         if payload.get("sv", 0) != (user.session_version or 0):
             raise AuthException(detail="Session has been revoked")

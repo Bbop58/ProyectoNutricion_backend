@@ -63,6 +63,7 @@ __all__ = [
 ]
 
 from app.models.company import Branch, CompanyAdministrator
+from app.models.commercial_plan import CommercialPlan, PlatformAudit
 from app.models.generated_report import GeneratedReport
 
 import app.services.audit_policy  # register business mutation auditing

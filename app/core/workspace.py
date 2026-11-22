@@ -62,7 +62,7 @@ def scope_queries(state):
         model = mapper.class_
         if issubclass(model, WorkspaceOwned):
             condition = model.tenant_id == scope.tenant_id if scope.tenant_id else false()
-            if scope.branch_id: condition = and_(condition, model.branch_id == scope.branch_id)
+            if scope.branch_id and model.__tablename__ != 'subscriptions': condition = and_(condition, model.branch_id == scope.branch_id)
         elif model is User:
             condition = model.tenant_id == scope.tenant_id if scope.tenant_id else false()
             if scope.branch_id: condition = and_(condition, model.branch_id == scope.branch_id)

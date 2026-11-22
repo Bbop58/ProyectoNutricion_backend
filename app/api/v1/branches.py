@@ -42,6 +42,8 @@ def create_branch(data: BranchCreate, user: User = Depends(get_current_user), db
     require_role(user, ADMIN_ROLES); require_tenant(user, data.tenant_id)
     company = db.get(Tenant, data.tenant_id)
     if not company: raise NotFoundException('Empresa no encontrada.')
+    from app.services.commercial_plan_service import check_capacity
+    check_capacity(db, data.tenant_id, 'branches')
     if not company.department_code: raise BadRequestException('Primero registra el departamento de la empresa.')
     validate_location(company.department_code, data.province_code, data.municipality_code)
     name = data.name.strip(); code = data.code.strip().upper()

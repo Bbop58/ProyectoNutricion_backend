@@ -99,6 +99,9 @@ def create_organization_user(
     if not tenant:
         raise NotFoundException("La organización seleccionada no existe")
 
+    if data.role_id == 'CLIENTE':
+        from app.services.commercial_plan_service import check_capacity
+        check_capacity(db, target_tenant_id, 'patients')
     user = User(
         email=clean_email,
         full_name=clean_name,
@@ -155,6 +158,9 @@ def update_organization_user(
     if data.phone is not None:
         user.phone = data.phone.strip() if data.phone else None
     if data.role_id is not None:
+        if data.role_id == 'CLIENTE' and user.role_id != 'CLIENTE':
+            from app.services.commercial_plan_service import check_capacity
+            check_capacity(db, user.tenant_id, 'patients')
         user.role_id = data.role_id
     if data.tenant_id is not None and current_user.role_id == "SUPERADMIN":
         from app.models.company import Branch, CompanyAdministrator

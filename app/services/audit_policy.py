@@ -55,7 +55,7 @@ def audit_business_changes(db, flush_context, instances):
     actor = db.info.get('audit_actor')
     if actor is None:
         return
-    excluded = {'activity_logs', 'token_blacklist', 'backup_logs', 'backup_settings', 'device_tokens'}
+    excluded = {'activity_logs', 'token_blacklist', 'backup_logs', 'backup_settings', 'device_tokens', 'commercial_plans', 'platform_audit'}
     for state, objects in [('CREADO', list(db.new)), ('ACTUALIZADO', list(db.dirty)), ('ELIMINADO', list(db.deleted))]:
         for obj in objects:
             table = getattr(obj, '__tablename__', '')

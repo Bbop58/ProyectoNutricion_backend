@@ -47,12 +47,24 @@ def get_current_user(
     if not user.is_active:
         raise AuthException(detail="User account is inactive")
 
+    from app.core.exceptions import ForbiddenException
+    from app.models.tenant import Tenant
+    path = request.url.path
+    platform_path = path == '/api/v1/platform' or path.startswith('/api/v1/platform/')
+    self_paths = {'/api/v1/users/me', '/api/v1/auth/logout', '/api/v1/auth/verify-developer-key'}
+    if user.role_id == 'SUPERADMIN' and not platform_path and path not in self_paths:
+        raise ForbiddenException('El superadministrador solo puede gestionar empresas, planes y suscripciones de la plataforma.')
+    if user.role_id != 'SUPERADMIN' and user.tenant_id and path != '/api/v1/auth/logout':
+        company = db.get(Tenant, user.tenant_id)
+        if company and not company.is_active:
+            raise ForbiddenException('La empresa está suspendida. Contacta al administrador de la plataforma.')
+
     user._workspace_company_id = None
     user._workspace_branch_id = None
     db.info['audit_actor'] = user
     from app.core.workspace import selection
     administrative = ('/api/v1/tenants', '/api/v1/branches', '/api/v1/roles')
-    context_path = request.url.path in {'/api/v1/users/me', '/api/v1/users/me/workspace', '/api/v1/users/me/workspace-options', '/api/v1/auth/logout'}
+    context_path = platform_path or request.url.path in {'/api/v1/users/me', '/api/v1/users/me/workspace', '/api/v1/users/me/workspace-options', '/api/v1/auth/logout'}
     try:
         if not context_path and not any(request.url.path.startswith(p) for p in administrative):
             explicit = 'x-workspace-company' in request.headers or 'x-workspace-branch' in request.headers
