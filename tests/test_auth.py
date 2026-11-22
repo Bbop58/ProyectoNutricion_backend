@@ -1,5 +1,6 @@
 import pytest
 from app.schemas.auth import LoginRequest
+from app.schemas.user import UserResponse
 
 
 def test_login_request_accepts_seeded_demo_email():
@@ -9,6 +10,22 @@ def test_login_request_accepts_seeded_demo_email():
     )
 
     assert request.email == "admin.nutrifit@example.test"
+
+
+def test_user_response_accepts_seeded_demo_email():
+    user = UserResponse.model_validate({
+        "id": "demo-admin",
+        "email": "admin.nutrifit@example.test",
+        "full_name": "Administración Demo",
+        "role_id": "ADMIN_ORGANIZATION",
+        "tenant_id": "demo-tenant",
+        "is_active": True,
+        "is_verified": True,
+        "created_at": "2026-01-01T00:00:00",
+        "updated_at": "2026-01-01T00:00:00",
+    })
+
+    assert user.email == "admin.nutrifit@example.test"
 
 
 def test_register_user_success(client):

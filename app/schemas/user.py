@@ -129,6 +129,14 @@ class DeveloperKeyVerifyResponse(BaseModel):
 
 
 class UserResponse(UserBase):
+    # Seeded accounts use reserved .test addresses; responses must still allow them.
+    email: str = Field(
+        ...,
+        min_length=3,
+        max_length=320,
+        pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$",
+        description="Correo electrónico",
+    )
     active_tenant_name: Optional[str] = None
     active_branch_name: Optional[str] = None
     active_tenant_id: Optional[str] = None
