@@ -17,7 +17,7 @@ class AppointmentService:
     def create_appointment(db: Session, current_user: User, data: AppointmentCreate, idempotency_key: Optional[str] = None) -> AppointmentOut:
         # Serialize schedules for both participants on PostgreSQL. A retry returns the same record.
         participants = db.query(User).filter(User.id.in_([current_user.id, data.nutritionist_id])).order_by(User.id).with_for_update().all()
-        nutritionist = next((user for user in participants if user.id == data.nutritionist_id and user.role_id == "NUTRICIONISTA" and user.is_active), None)
+        nutritionist = next((user for user in participants if user.id == data.nutritionist_id and user.role_id in {"NUTRICIONISTA", "ADMIN_ORGANIZATION"} and user.is_active), None)
         if not nutritionist:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -329,7 +329,7 @@ class AppointmentService:
         from sqlalchemy import or_, and_
         from app.models.patient_link import PatientNutritionistLink
         linked_admins = db.query(PatientNutritionistLink.nutritionist_id).filter_by(patient_id=current_user.id, status="LINKED", tenant_id=target_tenant)
-        specialist = User.role_id == "NUTRICIONISTA"
+        specialist = User.role_id.in_(["NUTRICIONISTA", "ADMIN_ORGANIZATION"])
         if target_tenant or current_user.role_id != "SUPERADMIN":
             specialist = and_(specialist, User.tenant_id == target_tenant)
         query = db.query(User).filter(User.is_active == True, specialist)

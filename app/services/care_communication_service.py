@@ -19,18 +19,30 @@ from app.services.care_service import STAFF, now, iso
 
 
 def contacts(db,actor):
+    if not actor.tenant_id: return []
+    if actor.role_id=='ADMIN_ORGANIZATION':
+        # The validated workspace still restricts this directory to the active
+        # company/branch. No patient-specialist link is reassigned.
+        return [dict(id=u.id,full_name=u.full_name,role_id=u.role_id) for u in
+            db.query(User).filter(User.tenant_id==actor.tenant_id,User.role_id=='CLIENTE',
+                                  User.is_active==True).order_by(User.full_name).all()]
     if actor.role_id=='CLIENTE': clause=PatientNutritionistLink.patient_id==actor.id
     elif actor.role_id=='NUTRICIONISTA': clause=PatientNutritionistLink.nutritionist_id==actor.id
     else: return []
     links=db.query(PatientNutritionistLink).filter(clause,PatientNutritionistLink.status=='LINKED',PatientNutritionistLink.tenant_id==actor.tenant_id).all()
     ids={x.nutritionist_id if actor.role_id=='CLIENTE' else x.patient_id for x in links}
+    if actor.role_id=='CLIENTE':
+        # Company administrators remain reachable when they work in another
+        # branch; patients keep their own branch and existing specialist link.
+        ids.update(row[0] for row in db.query(User.id).filter(
+            User.tenant_id==actor.tenant_id,User.role_id=='ADMIN_ORGANIZATION',User.is_active==True).all())
     return [dict(id=u.id,full_name=u.full_name,role_id=u.role_id) for u in db.query(User).filter(User.id.in_(ids),User.is_active==True).order_by(User.full_name).all()]
 
 
 def conversation_access(db,actor,peer_id):
     peer=db.query(User).filter_by(id=peer_id,is_active=True).first()
     if not peer or peer.id not in {x['id'] for x in contacts(db,actor)} or not actor.tenant_id or peer.tenant_id!=actor.tenant_id:
-        raise HTTPException(403,'Solo puedes conversar con tu paciente o nutricionista vinculado.')
+        raise HTTPException(403,'Solo puedes conversar con pacientes autorizados o con tu equipo de nutrición de la misma empresa.')
     return peer
 
 

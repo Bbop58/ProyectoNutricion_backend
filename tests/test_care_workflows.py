@@ -13,6 +13,52 @@ def link(db):
     db.commit()
 
 
+def test_admin_can_message_patient_without_specialist_link(client, db_session, platform):
+    # An administrator can contact company patients without taking their link
+    # away from the treating nutritionist.
+    link(db_session)
+    contacts=client.get('/api/v1/care/contacts',headers=headers('admin')).json()
+    assert 'patient' in {x['id'] for x in contacts}
+    patient_contacts=client.get('/api/v1/care/contacts',headers=headers('patient')).json()
+    assert {'admin','doctor'} <= {x['id'] for x in patient_contacts}
+    r=client.post('/api/v1/care/conversations/patient',headers=headers('admin'),json={'content':'Consulta administrativa'})
+    assert r.status_code==201,r.text
+    r=client.post('/api/v1/care/conversations/admin',headers=headers('patient'),json={'content':'Respuesta del paciente'})
+    assert r.status_code==201,r.text
+    thread=client.get('/api/v1/care/conversations/patient',headers=headers('admin')).json()
+    assert len(thread['items'])==2
+    assert client.get('/api/v1/care/conversations/patient',headers=headers('other')).status_code==403
+    assert db_session.get(PatientNutritionistLink,'link').nutritionist_id=='doctor'
+
+
+def test_admin_message_scope_follows_selected_branch(client, db_session, platform):
+    from app.models.company import Branch
+    db_session.add(Branch(id='a2',tenant_id='a',name='Sur',code='SUR'))
+    db_session.flush()
+    db_session.add(User(id='patient2',tenant_id='a',branch_id='a2',role_id='CLIENTE',
+        email='second@example.test',full_name='Second',hashed_password='test'))
+    db_session.commit()
+    assert 'patient2' not in {x['id'] for x in client.get('/api/v1/care/contacts',headers=headers('admin')).json()}
+    assert client.get('/api/v1/care/conversations/patient2',headers=headers('admin')).status_code==403
+    selected={**headers('admin'),'X-Workspace-Company':'a','X-Workspace-Branch':'a2'}
+    assert 'patient2' in {x['id'] for x in client.get('/api/v1/care/contacts',headers=selected).json()}
+    assert client.post('/api/v1/care/conversations/patient2',headers=selected,json={'content':'Hola desde administración'}).status_code==201
+    assert client.post('/api/v1/care/conversations/admin',headers=headers('patient2'),json={'content':'Respuesta desde Sur'}).status_code==201
+
+
+def test_company_admin_is_available_as_appointment_specialist(client, db_session, platform):
+    r=client.get('/api/v1/appointments/nutritionists',headers=headers('patient'))
+    assert r.status_code==200,r.text
+    assert {'admin','doctor'} <= {x['id'] for x in r.json()}
+    assert 'other' not in {x['id'] for x in r.json()}
+    future=datetime.now(timezone.utc)+timedelta(days=1)
+    future=future.replace(hour=14,minute=0,second=0,microsecond=0)
+    r=client.post('/api/v1/appointments',headers=headers('patient'),json={
+        'nutritionist_id':'admin','scheduled_at':future.isoformat(),'reason':'Consulta con administrador'})
+    assert r.status_code==200,r.text
+    assert r.json()['nutritionist_id']=='admin'
+
+
 def test_measurements_history_dates_and_scope(client,db_session,platform):
     link(db_session)
     body={'weight_kg':70,'height_cm':170,'measured_at':(datetime.now(timezone.utc)-timedelta(days=2)).isoformat()}
@@ -80,7 +126,7 @@ def test_review_correction_rejection_and_approval_audit(client,db_session,platfo
 
 def test_human_conversations_require_active_link(client,db_session,platform):
     link(db_session)
-    assert client.get('/api/v1/care/contacts',headers=headers('patient')).json()[0]['id']=='doctor'
+    assert 'doctor' in {x['id'] for x in client.get('/api/v1/care/contacts',headers=headers('patient')).json()}
     path='/api/v1/care/conversations/doctor'
     assert client.post(path,headers=headers('patient'),json={'content':'Hola, necesito consultar mis porciones.'}).status_code==201
     thread=client.get('/api/v1/care/conversations/patient',headers=headers('doctor')).json()
