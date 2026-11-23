@@ -49,6 +49,22 @@ def test_superadmin_only_has_platform_access(client, platform):
     assert all('patients' not in c and 'payments' not in c for c in companies)
 
 
+def test_company_subscription_ignores_newer_patient_personal_plan(client, db_session, platform):
+    from app.services.subscription_service import SubscriptionService
+    db_session.add(Subscription(id='personal', tenant_id='a', user_id='patient', branch_id='a1',
+        plan_name='CLIENTE_PREMIUM', status='ACTIVE', amount=5,
+        created_at=datetime.now()+timedelta(days=1),
+        expires_at=datetime.now()+timedelta(days=365)))
+    db_session.commit()
+    assert SubscriptionService.get_active(db_session, tenant_id='a').id == 'original'
+    r = client.get('/api/v1/subscriptions/current', headers=headers('admin'))
+    assert r.status_code == 200
+    assert r.json()['id'] == 'original'
+    r = client.get('/api/v1/subscriptions/current', headers=headers('patient'))
+    assert r.status_code == 200
+    assert r.json()['id'] == 'personal'
+
+
 def test_plans_assignment_snapshot_and_audit(client, db_session, platform):
     body = dict(code='NUEVO', display_name='Nuevo', price=15, duration_days=60, max_patients=5, max_branches=2, is_active=True, reason='Alta comercial')
     r = client.post('/api/v1/platform/plans', headers=headers(), json=body)

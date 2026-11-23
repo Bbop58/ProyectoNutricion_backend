@@ -381,7 +381,9 @@ class SubscriptionService:
         if user_id:
             query = query.filter(Subscription.user_id == user_id)
         elif tenant_id:
-            query = query.filter(Subscription.tenant_id == tenant_id)
+            # Legacy personal plans may carry the patient's company ID.
+            query = query.filter(Subscription.tenant_id == tenant_id,
+                                 ~Subscription.plan_name.startswith('CLIENTE_'))
         else:
             return None
 
