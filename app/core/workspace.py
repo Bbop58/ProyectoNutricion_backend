@@ -62,7 +62,13 @@ def scope_queries(state):
         model = mapper.class_
         if issubclass(model, WorkspaceOwned):
             condition = model.tenant_id == scope.tenant_id if scope.tenant_id else false()
-            if scope.branch_id and model.__tablename__ != 'subscriptions': condition = and_(condition, model.branch_id == scope.branch_id)
+            if scope.branch_id and model.__tablename__ != 'subscriptions':
+                branch_condition = model.branch_id == scope.branch_id
+                # A recipe without a branch is the company's shared catalogue.
+                # Keep tenant isolation and all patient/assignment scopes intact.
+                if model.__tablename__ == 'recipes':
+                    branch_condition = or_(branch_condition, model.branch_id.is_(None))
+                condition = and_(condition, branch_condition)
         elif model is User:
             condition = model.tenant_id == scope.tenant_id if scope.tenant_id else false()
             if scope.branch_id: condition = and_(condition, model.branch_id == scope.branch_id)
