@@ -44,7 +44,7 @@ def test_seed_creates_business_history_within_plan_rules_and_is_idempotent(db_se
     assert first["patient_links"] == 159
     assert first["payments"] == first["appointments"]
     assert first["subscription_receipts"] == first["subscriptions"]
-    assert first["recipes"] == 24
+    assert first["recipes"] == 96
     assert first["food_records"] > 159
 
     expected_subscription_sales = sum(11 * PLANS[company.plan]["price"] for company in DEMO_COMPANIES)
@@ -137,7 +137,7 @@ def test_seed_creates_business_history_within_plan_rules_and_is_idempotent(db_se
             item["text"] == "Recetario & Macros" and item["included"]
             for item in PLANS[company.plan]["features"]
         )
-        assert len(recipes) == (8 if recipe_feature else 0)
+        assert len(recipes) == (32 if recipe_feature else 0)
         assert all("ficticia" in row.description.lower() for row in recipes)
         assert all(row.created_by and row.branch_id is None for row in recipes)
         assert food_records
@@ -160,7 +160,7 @@ def test_seed_creates_business_history_within_plan_rules_and_is_idempotent(db_se
     assert db_session.query(Branch).count() == 12
     assert db_session.query(Subscription).count() == 55
     assert db_session.query(SubscriptionReceipt).count() == 55
-    assert db_session.query(Recipe).count() == 24
+    assert db_session.query(Recipe).count() == 96
     assert db_session.query(FoodRecord).count() == first["food_records"]
 
 

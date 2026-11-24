@@ -1,0 +1,5 @@
+full_name,email,password,phone
+Paciente Importacion Demo Uno,qa.import.demo.uno@example.com,DemoImport2026!,
+Paciente Importacion Demo Dos,qa.import.demo.dos@example.com,DemoImport2026!,
+Paciente Importacion Demo Repetido,qa.import.demo.uno@example.com,DemoImport2026!,
+Paciente Importacion Demo Invalido,correo-invalido,123,

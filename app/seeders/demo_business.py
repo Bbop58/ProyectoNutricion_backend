@@ -26,6 +26,8 @@ from app.models.user import User
 from app.schemas.ai_nutrition import FoodRecordCreate
 from app.services.consultation_payment_service import ConsultationPaymentService
 from app.services.subscription_service import PLANS
+from app.seeders.demo_care import ensure_demo_configuration, ensure_demo_patient_care
+from app.seeders.demo_recipes import EXTRA_DEMO_RECIPES
 
 PERIOD_START = date(2026, 1, 1)
 PERIOD_END = date(2026, 11, 22)
@@ -74,6 +76,7 @@ class DemoRecipe:
     prep_time_minutes: int
     ingredients: str
     instructions: str
+    sodium: float = 0
 
 
 DEMO_RECIPES = (
@@ -118,6 +121,8 @@ DEMO_RECIPES = (
                "Fruta de estación y semillas mixtas.",
                "Lavar y cortar la fruta; servir con una pequeña porción de semillas."),
 )
+
+DEMO_RECIPES += tuple(DemoRecipe(**item) for item in EXTRA_DEMO_RECIPES)
 
 DEMO_MEALS = (
     ("Desayuno", "Registro demo: avena con fruta", 350, 12, 57, 9, 9, 8, 0),
@@ -425,7 +430,7 @@ def _ensure_recipe_catalog(db: Session, tenant: Tenant, nutritionist: User,
         ).first()
         if duplicate_title:
             raise ValueError(f"El título de receta reservado ya existe en {company.code}: {item.title}.")
-        created_at = datetime(2026, 1 + recipe_index, 3)
+        created_at = datetime(2026, 1 + recipe_index % 11, 3)
         db.add(Recipe(
             id=recipe_id,
             tenant_id=tenant.id,
@@ -439,7 +444,7 @@ def _ensure_recipe_catalog(db: Session, tenant: Tenant, nutritionist: User,
             carbohydrates=item.carbohydrates,
             fats=item.fats,
             fiber=item.fiber,
-            sodium=0,
+            sodium=item.sodium,
             servings=1,
             prep_time_minutes=item.prep_time_minutes,
             cook_time_minutes=0,
@@ -560,6 +565,8 @@ def _ensure_patient_history(db: Session, tenant: Tenant, branches: list[Branch],
 
         _ensure_food_diary(db, patient, branch, company, patient_number,
                            joined_month, report)
+        ensure_demo_patient_care(db, patient, nutritionist, patient_number,
+                                joined_at, PERIOD_END, report)
 
         available_months = 11 - joined_month
         visit_count = min(1 + (patient_index % 4), available_months)
@@ -681,6 +688,9 @@ def seed_demo_businesses(db: Session, password: str, *, environment: str,
         "subscriptions": 0, "subscription_receipts": 0,
         "appointments": 0, "payments": 0,
         "recipes": 0, "food_records": 0,
+        "anamneses": 0, "preserved_anamneses": 0, "measurements": 0,
+        "clinical_records": 0, "draft_plans": 0, "care_messages": 0,
+        "nutrition_configurations": 0,
     }
     password_hash = get_password_hash(password)
     try:
@@ -688,6 +698,7 @@ def seed_demo_businesses(db: Session, password: str, *, environment: str,
             tenant = _ensure_tenant(db, company, report)
             branches = _ensure_branches(db, tenant, company, report)
             admin = _ensure_admin(db, tenant, branches[0], company, password_hash, report)
+            ensure_demo_configuration(db, tenant, admin, report)
             _ensure_subscriptions(db, tenant, branches[0], company, admin, report)
             _ensure_subscription_receipts(db, tenant, admin, company, report)
             nutritionists = _ensure_nutritionists(db, tenant, branches, company, password_hash, report)

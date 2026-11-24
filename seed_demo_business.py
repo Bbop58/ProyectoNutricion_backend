@@ -34,6 +34,8 @@ def main() -> int:
     count_labels = (
         "companies", "branches", "users", "patient_links", "subscriptions",
         "subscription_receipts", "appointments", "payments", "recipes", "food_records",
+        "anamneses", "preserved_anamneses", "measurements", "clinical_records",
+        "draft_plans", "care_messages", "nutrition_configurations",
     )
     print("Carga demo completada (registros nuevos):")
     for label in count_labels:
