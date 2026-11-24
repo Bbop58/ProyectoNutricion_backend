@@ -73,7 +73,9 @@ def read(db, actor, patient, intent, state):
     details=[]
     profile=actions.profile_for(db,patient) if intent.topic=='recommendations' else None
     for recipe in recipes:
-        item=dict(title=recipe.title,category=recipe.category,servings=recipe.servings,
+        original_options=[r['id'] for r in state.get('recipes',[])]
+        item=dict(option_number=original_options.index(recipe.id)+1 if recipe.id in original_options else None,
+                  title=recipe.title,category=recipe.category,servings=recipe.servings,
                   calories=recipe.calories,protein=recipe.protein,carbohydrates=recipe.carbohydrates,fats=recipe.fats)
         if profile:
             evaluation=actions.evaluate_recipe(recipe,profile)
@@ -86,4 +88,4 @@ def read(db, actor, patient, intent, state):
         explanations=[r['title']+': '+'; '.join(r['reasons']+r['warnings']) for r in details]
         summary=f'Objetivo registrado: {profile.goal}. Motivos de las recetas: '+' | '.join(explanations)
     profile_context=({field:getattr(profile,field) for field in ('goal','allergies','other_allergies','pathologies','other_pathologies','food_preferences')} if profile else None)
-    return dict(**base,recipes=details,profile_context=profile_context,limited_to=len(details),clinical_decision='Requiere revisión profesional de ficha, ingredientes y porción'),summary
+    return dict(**base,recipes=details,requested_option=intent.choice or None,profile_context=profile_context,limited_to=len(details),clinical_decision='Requiere revisión profesional de ficha, ingredientes y porción'),summary

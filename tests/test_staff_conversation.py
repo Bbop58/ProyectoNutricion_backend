@@ -264,7 +264,9 @@ def test_why_uses_displayed_recipe_context_and_ai_explanation(demo,monkeypatch,q
     monkeypatch.setattr(staff_gemini,'interpret',lambda *args:pytest.fail('The reference is already clear; use the grounded answer'))
     def answer(message,facts,*args,**kwargs):
         assert facts['recipes'] and facts['profile_context']['allergies']=='Lactosa'
-        if 'segunda' in message:assert len(facts['recipes'])==1 and facts['recipes'][0]['title']==recipes['recipes'][1]['title']
+        if 'segunda' in message:
+            assert len(facts['recipes'])==1 and facts['recipes'][0]['title']==recipes['recipes'][1]['title']
+            assert facts['requested_option']==2 and facts['recipes'][0]['option_number']==2
         return 'La propuesta aporta fibra y respeta el filtro de lactosa registrado; revisá porción y objetivo.',{'engine':'gemini','total_tokens':30}
     monkeypatch.setattr(staff_gemini,'answer',answer)
     result=ask(demo,question,recipes)
