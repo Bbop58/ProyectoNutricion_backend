@@ -1,5 +1,11 @@
 """24 additional fictional catalog dishes, not clinical prescriptions."""
 
+DEMO_RECIPE_IMAGE_BASE_URL = "https://nutrisalud-web.vercel.app/assets/recipes/demo"
+
+
+def demo_recipe_image_url(key: str) -> str:
+    return f"{DEMO_RECIPE_IMAGE_BASE_URL}/{key}.webp"
+
 # key, title, category, protein g, carbs g, fats g, fiber g, sodium mg,
 # preparation minutes, explicit ingredients, instructions. Values are estimates.
 _DISHES = (

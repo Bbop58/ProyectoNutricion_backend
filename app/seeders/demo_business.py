@@ -27,7 +27,7 @@ from app.schemas.ai_nutrition import FoodRecordCreate
 from app.services.consultation_payment_service import ConsultationPaymentService
 from app.services.subscription_service import PLANS
 from app.seeders.demo_care import ensure_demo_configuration, ensure_demo_patient_care
-from app.seeders.demo_recipes import EXTRA_DEMO_RECIPES
+from app.seeders.demo_recipes import EXTRA_DEMO_RECIPES, demo_recipe_image_url
 
 PERIOD_START = date(2026, 1, 1)
 PERIOD_END = date(2026, 11, 22)
@@ -438,7 +438,7 @@ def _ensure_recipe_catalog(db: Session, tenant: Tenant, nutritionist: User,
             created_by=nutritionist.id,
             title=item.title,
             description=item.description,
-            image_url=None,
+            image_url=demo_recipe_image_url(item.key),
             calories=item.calories,
             protein=item.protein,
             carbohydrates=item.carbohydrates,
