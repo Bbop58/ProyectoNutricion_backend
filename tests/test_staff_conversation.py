@@ -253,3 +253,34 @@ def test_question_on_missing_profile_returns_a_fact_not_an_invented_record(demo)
     from app.services import staff_assistant_questions as questions
     facts,text=questions.read(demo.db,demo.actor,demo.users['homonym'],AssistantIntent(action='question',topic='allergies'),{})
     assert facts['record_exists'] is False and 'no tiene una anamnesis' in text
+
+
+@pytest.mark.parametrize('question',['¿Por qué?','porque','¿Por qué la segunda?'])
+def test_why_uses_displayed_recipe_context_and_ai_explanation(demo,monkeypatch,question):
+    selected=ask(demo,'sí',find(demo,monkeypatch))
+    monkeypatch.setattr(staff_gemini,'interpret',lambda *args:(AssistantIntent(action='recommend',meal='Cena'),{'engine':'gemini','total_tokens':10}))
+    recipes=ask(demo,'Recomendale una cena',selected)
+    monkeypatch.setattr(staff_gemini,'interpret',lambda *args:pytest.fail('The reference is already clear; use the grounded answer'))
+    def answer(message,facts,*args,**kwargs):
+        assert facts['recipes'] and facts['profile_context']['allergies']=='Lactosa'
+        if 'segunda' in message:assert len(facts['recipes'])==1 and facts['recipes'][0]['title']==recipes['recipes'][1]['title']
+        return 'La propuesta aporta fibra y respeta el filtro de lactosa registrado; revisá porción y objetivo.',{'engine':'gemini','total_tokens':30}
+    monkeypatch.setattr(staff_gemini,'answer',answer)
+    result=ask(demo,question,recipes)
+    assert result['answer_source']=='gemini_with_authorized_data'
+    assert demo.db.query(RecipeAssignment).count()==0
+
+
+def test_why_remembers_recipe_even_after_confirming_assignment(demo,monkeypatch):
+    selected=ask(demo,'sí',find(demo,monkeypatch))
+    monkeypatch.setattr(staff_gemini,'interpret',lambda *args:(AssistantIntent(action='recommend',meal='Cena'),{'engine':'gemini','total_tokens':10}))
+    recipes=ask(demo,'Recomendale una cena',selected)
+    pending=ask(demo,'Asignale la primera',recipes)
+    assigned=ask(demo,'confirmo',pending)
+    def answer(message,facts,*args,**kwargs):
+        assert len(facts['recipes'])==1 and facts['recipes'][0]['title']==recipes['recipes'][0]['title']
+        return 'Estos son los motivos registrados de la receta asignada.',{'engine':'gemini','total_tokens':30}
+    monkeypatch.setattr(staff_gemini,'answer',answer)
+    result=ask(demo,'¿Por qué?',assigned)
+    assert result['answer_source']=='gemini_with_authorized_data'
+    assert demo.db.query(RecipeAssignment).count()==1

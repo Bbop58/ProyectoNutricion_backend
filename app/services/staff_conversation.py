@@ -19,7 +19,7 @@ ORDINAL = {'primera':1, 'primero':1, 'segunda':2, 'segundo':2, 'tercera':3, 'ter
 def read_context(db, actor, token):
     tenant, branch = actions.scope_for(db, actor)
     if not token:
-        return dict(patient=None, candidates=[], recipes=[], meal='', seen=[], pending=None, awaiting=None, followup=None, last_topic=None)
+        return dict(patient=None, candidates=[], recipes=[], meal='', seen=[], pending=None, awaiting=None, followup=None, last_topic=None, discussed_recipes=[])
     try:
         state = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
     except JWTError:
@@ -27,7 +27,9 @@ def read_context(db, actor, token):
     if (state.get('type') != 'staff_assistant_context' or state.get('sub') != actor.id
             or state.get('sv') != (actor.session_version or 0) or state.get('tenant') != tenant or state.get('branch') != branch):
         raise HTTPException(403, 'Esta conversación pertenece a otro profesional o espacio de trabajo. Inicia un nuevo chat.')
-    return {key:state.get(key) for key in ('patient','candidates','recipes','meal','seen','pending','awaiting','followup','last_topic')}
+    result={key:state.get(key) for key in ('patient','candidates','recipes','meal','seen','pending','awaiting','followup','last_topic','discussed_recipes')}
+    result['discussed_recipes']=result.get('discussed_recipes') or [r['id'] for r in result['recipes']]
+    return result
 
 
 def respond(db, actor, state, **reply):
@@ -40,7 +42,7 @@ def respond(db, actor, state, **reply):
 
 
 def clear_proposals(state):
-    state.update(recipes=[], pending=None, seen=[], meal='', awaiting=None)
+    state.update(recipes=[], pending=None, seen=[], meal='', awaiting=None, discussed_recipes=[])
 
 
 def choose_patient(db, actor, state, identity):
@@ -72,7 +74,13 @@ def profile_details(profile):
 
 
 def local_intent(message, state):
-    text=re.sub(r'[.!¡¿?]+$', '', actions.normal(message)).strip()
+    text=actions.normal(message).strip(' .!¡¿?')
+    if state.get('last_topic')=='recommendations' and (state.get('discussed_recipes') or state['recipes']):
+        words=set(text.split())
+        why=text in {'por que','porque','y por que','explicame','explicame la recomendacion','explicame por que'} or (text.startswith(('por que ','porque ','y por que ','explicame por que ')) and bool(words & (set(ORDINAL) | {'receta','recetas','recomendacion','recomendas','recomiendas','recomendaste','recomendo','esa','esas'})) and not bool(words & {'cita','citas','vinculado','vinculada','pago'}))
+        if why:
+            choice=next((number for word,number in ORDINAL.items() if word in words),0)
+            return AssistantIntent(action='question',topic='recommendations',choice=choice)
     if text in YES:
         if state['pending']:return AssistantIntent(action='confirm')
         if len(state['candidates'])==1:return AssistantIntent(action='select',choice=1)
@@ -116,7 +124,7 @@ def chat(db, actor, body):
             state['pending'] = None
             return reply(kind='message',message='Todavía no hay una asignación pendiente para confirmar. Primero elegí una receta de las propuestas.')
         result=actions.confirm(db,actor,state['pending'])
-        state.update(pending=None,recipes=[],awaiting=None)
+        state.update(pending=None,recipes=[],awaiting=None,discussed_recipes=[result['recipe_id']],last_topic='recommendations')
         return reply(kind='assigned',message=result['message'],patient=actions.patient_summary(actions.authorized_patient(db,actor,result['patient_id'])))
     if intent.action=='select':
         if state['recipes']:
@@ -131,7 +139,7 @@ def chat(db, actor, body):
             patient=actions.authorized_patient(db,actor,data['patient'])
             recipe=db.query(Recipe).filter_by(id=data['recipe'],tenant_id=patient.tenant_id,is_active=True).first()
             if not recipe:raise HTTPException(409,'La receta ya no está disponible. Pide otra propuesta.')
-            state.update(pending=token,awaiting='confirmation')
+            state.update(pending=token,awaiting='confirmation',discussed_recipes=[recipe.id])
             return reply(kind='confirmation',patient=actions.patient_summary(patient),
                          message=f'¿Confirmás asignar «{recipe.title}» a {patient.full_name}? Revisá ingredientes y porción. Escribí «confirmo» para guardar o «no» para descartar.',
                          confirmation=dict(title=recipe.title,patient_name=patient.full_name))
@@ -194,7 +202,7 @@ def chat(db, actor, body):
             state['seen']=list(dict.fromkeys(state['seen']+[r['id'] for r in state['recipes']]))[-32:]
         else:state['seen']=[]
         result=actions.recommendations(db,actor,selected,meal,state['seen'])
-        state.update(meal=meal,pending=None,awaiting=None,last_topic='recommendations',candidates=[],recipes=[dict(id=r['id'],token=r['proposal_token']) for r in result['recipes']])
+        state.update(meal=meal,pending=None,awaiting=None,last_topic='recommendations',candidates=[],discussed_recipes=[r['id'] for r in result['recipes']],recipes=[dict(id=r['id'],token=r['proposal_token']) for r in result['recipes']])
         result['recipes']=[{key:value for key,value in r.items() if key!='proposal_token'} for r in result['recipes']]
         if result['recipes']:result['message']+=' Podés decir «otra opción» o «asignale la segunda».'
         return reply(**result)
