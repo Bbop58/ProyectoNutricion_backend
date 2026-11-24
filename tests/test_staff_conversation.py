@@ -166,6 +166,7 @@ def test_free_question_uses_only_needed_profile_fields_and_never_writes(demo,mon
         captured.append(facts)
         assert set(facts['recorded'])=={'allergies','other_allergies'}
         assert facts['recorded']['allergies']=='Lactosa'
+        assert 'verified_summary' in facts
         assert not any(key in str(facts) for key in ['hashed_password','pairing_code','@example.com','weight_kg'])
         return 'Tiene lactosa registrada entre sus alergias e intolerancias.',{'engine':'gemini','total_tokens':40}
     monkeypatch.setattr(staff_gemini,'answer',render)

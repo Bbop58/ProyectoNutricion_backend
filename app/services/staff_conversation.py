@@ -203,7 +203,7 @@ def chat(db, actor, body):
 def grounded_reply(reply, message, facts, fallback, usage, actor, **values):
     try:
         interpreted=usage.get('engine')=='gemini'
-        answer,answer_usage=staff_gemini.answer(message,facts,actor.id,actor.tenant_id,interpreted=interpreted)
+        answer,answer_usage=staff_gemini.answer(message,{**facts,'verified_summary':fallback},actor.id,actor.tenant_id,interpreted=interpreted)
     except HTTPException:
         # The factual tool result remains usable if the optional wording call fails.
         return reply(kind='message',message=fallback,answer_source='database',**values)
