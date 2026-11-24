@@ -7,7 +7,7 @@ from jose import JWTError, jwt
 from app.config import settings
 from app.models.recipe import Recipe
 from app.schemas.staff_assistant import AssistantIntent
-from app.services import staff_assistant_service as actions, staff_gemini
+from app.services import staff_assistant_service as actions, staff_gemini, staff_assistant_questions as questions
 
 YES = {'si', 'si confirmo', 'confirmo', 'confirmar', 'confirmar asignacion', 'si asignala', 'confirmo la asignacion', 'adelante', 'de acuerdo'}
 NO = {'no', 'cancelar', 'cancela', 'no confirmo', 'descartar', 'descartala', 'mejor no', 'no gracias'}
@@ -19,7 +19,7 @@ ORDINAL = {'primera':1, 'primero':1, 'segunda':2, 'segundo':2, 'tercera':3, 'ter
 def read_context(db, actor, token):
     tenant, branch = actions.scope_for(db, actor)
     if not token:
-        return dict(patient=None, candidates=[], recipes=[], meal='', seen=[], pending=None, awaiting=None)
+        return dict(patient=None, candidates=[], recipes=[], meal='', seen=[], pending=None, awaiting=None, followup=None, last_topic=None)
     try:
         state = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
     except JWTError:
@@ -27,7 +27,7 @@ def read_context(db, actor, token):
     if (state.get('type') != 'staff_assistant_context' or state.get('sub') != actor.id
             or state.get('sv') != (actor.session_version or 0) or state.get('tenant') != tenant or state.get('branch') != branch):
         raise HTTPException(403, 'Esta conversación pertenece a otro profesional o espacio de trabajo. Inicia un nuevo chat.')
-    return {key:state.get(key) for key in ('patient','candidates','recipes','meal','seen','pending','awaiting')}
+    return {key:state.get(key) for key in ('patient','candidates','recipes','meal','seen','pending','awaiting','followup','last_topic')}
 
 
 def respond(db, actor, state, **reply):
@@ -92,11 +92,12 @@ def local_intent(message, state):
 
 def chat(db, actor, body):
     state=read_context(db,actor,body.context_token)
+    question=body.message
     intent=local_intent(body.message,state)
     usage={'engine':'local','total_tokens':0}
     if intent is None:
         hints=dict(patient_selected=bool(state['patient']),patient_options=len(state['candidates']),
-                   recipe_options=len(state['recipes']),awaiting_confirmation=bool(state['pending']),meal=state['meal'])
+                   recipe_options=len(state['recipes']),awaiting_confirmation=bool(state['pending']),meal=state['meal'],last_topic=state.get('last_topic'))
         intent,usage=staff_gemini.interpret(body.message,actor.id,actor.tenant_id,hints)
 
     def reply(**values):
@@ -107,7 +108,7 @@ def chat(db, actor, body):
         state['pending'] = None
 
     if intent.action=='cancel':
-        clear_proposals(state);state['candidates']=[]
+        clear_proposals(state);state.update(candidates=[],followup=None)
         return reply(kind='message',message='De acuerdo, descarté lo pendiente. No guardé una asignación nueva. ¿Qué querés hacer ahora?')
     if intent.action=='confirm':
         # A model classification alone can NEVER authorize a write.
@@ -135,20 +136,33 @@ def chat(db, actor, body):
                          message=f'¿Confirmás asignar «{recipe.title}» a {patient.full_name}? Revisá ingredientes y porción. Escribí «confirmo» para guardar o «no» para descartar.',
                          confirmation=dict(title=recipe.title,patient_name=patient.full_name))
         if state['candidates'] and 1<=intent.choice<=len(state['candidates']):
+            followup=state.get('followup')
             patient=choose_patient(db,actor,state,state['candidates'][intent.choice-1])
-            return reply(kind='message',patient=actions.patient_summary(patient),message=f'Perfecto, trabajamos con {patient.full_name}. Podés pedirme su anamnesis o una receta.')
-        return reply(kind='message',message='Primero busquemos un paciente o pidamos recetas. No hay opciones claras para elegir en este momento.')
+            state['followup']=None
+            if not followup:
+                return reply(kind='message',patient=actions.patient_summary(patient),message=f'Perfecto, trabajamos con {patient.full_name}. Podés pedirme su anamnesis o una receta.')
+            intent=AssistantIntent.model_validate(followup['intent'])
+            question=followup['message']
+        elif intent.action=='select':
+            return reply(kind='message',message='Primero busquemos un paciente o pidamos recetas. No hay opciones claras para elegir en este momento.')
     if intent.action=='help':
         return reply(kind='message',message='Podés conversar conmigo: «Buscá al paciente Alex», «Mostrame su anamnesis», «Recomendale una cena», «Otra opción» y «Asignale la segunda». Te pediré «confirmo» antes de guardar. Por ahora trabajo con pacientes y recetas de tu espacio autorizado.')
+
+    if intent.action=='question' and intent.topic=='help':
+        facts,fallback=questions.read(db,actor,None,intent,state)
+        return grounded_reply(reply,body.message,facts,fallback,usage,actor)
 
     name=intent.patient_name.strip()
     selected=actions.authorized_patient(db,actor,state['patient']) if state['patient'] else None
     if intent.action=='patients' or (name and (not selected or not all(actions.mentions(actions.normal(selected.full_name),word) for word in actions.normal(name).split()))):
         matches=actions.search_patients(db,actor,name)
         clear_proposals(state)
-        state.update(patient=None,candidates=[p['id'] for p in matches['patients']])
+        state.update(patient=None,candidates=[p['id'] for p in matches['patients']],followup=None)
+        if intent.action!='patients':
+            state['followup']={'intent':intent.model_dump(),'message':question}
         if intent.action!='patients' and len(matches['patients'])==1 and not matches['has_more']:
             selected=choose_patient(db,actor,state,matches['patients'][0]['id'])
+            state['followup']=None
         else:
             text=('Encontré a '+matches['patients'][0]['full_name']+'. ¿Trabajamos con este paciente? Podés responder «sí».'
                   if len(matches['patients'])==1 and not matches['has_more'] else
@@ -157,11 +171,20 @@ def chat(db, actor, body):
             return reply(kind='patients',message=text,**matches)
     if not selected and len(state['candidates'])==1:
         selected=choose_patient(db,actor,state,state['candidates'][0])
+    if not selected and state['candidates']:
+        state['followup']={'intent':intent.model_dump(),'message':question}
+        # Re-authorize each original candidate; preserve numbering from the signed context.
+        candidates=[actions.patient_summary(actions.authorized_patient(db,actor,identity)) for identity in state['candidates']]
+        return reply(kind='patients',message='¿A cuál paciente te referís? Indicá el número o su nombre completo.',patients=candidates)
     if not selected:
         return reply(kind='message',message='¿Para qué paciente? Escribí su nombre o elegí una coincidencia de la búsqueda anterior.')
+    if intent.action=='question':
+        state.update(last_topic=intent.topic,awaiting=None)
+        facts,fallback=questions.read(db,actor,selected,intent,state)
+        return grounded_reply(reply,question,facts,fallback,usage,actor,patient=actions.patient_summary(selected))
     if intent.action=='profile':
         profile=actions.profile_for(db,selected)
-        state['awaiting']='recommend'
+        state.update(awaiting='recommend',last_topic='profile')
         return reply(kind='profile',patient=actions.patient_summary(selected),profile_details=profile_details(profile),
                      message=f'Esta es la anamnesis registrada de {selected.full_name}. ¿Querés que busque una receta según esta ficha?')
     if intent.action in {'recommend','more'}:
@@ -170,8 +193,21 @@ def chat(db, actor, body):
             state['seen']=list(dict.fromkeys(state['seen']+[r['id'] for r in state['recipes']]))[-32:]
         else:state['seen']=[]
         result=actions.recommendations(db,actor,selected,meal,state['seen'])
-        state.update(meal=meal,pending=None,awaiting=None,candidates=[],recipes=[dict(id=r['id'],token=r['proposal_token']) for r in result['recipes']])
+        state.update(meal=meal,pending=None,awaiting=None,last_topic='recommendations',candidates=[],recipes=[dict(id=r['id'],token=r['proposal_token']) for r in result['recipes']])
         result['recipes']=[{key:value for key,value in r.items() if key!='proposal_token'} for r in result['recipes']]
         if result['recipes']:result['message']+=' Podés decir «otra opción» o «asignale la segunda».'
         return reply(**result)
     return reply(kind='message',message='No entendí cómo continuar. Podés pedirme buscar un paciente, ver su ficha o recomendarle una receta.')
+
+
+def grounded_reply(reply, message, facts, fallback, usage, actor, **values):
+    try:
+        interpreted=usage.get('engine')=='gemini'
+        answer,answer_usage=staff_gemini.answer(message,facts,actor.id,actor.tenant_id,interpreted=interpreted)
+    except HTTPException:
+        # The factual tool result remains usable if the optional wording call fails.
+        return reply(kind='message',message=fallback,answer_source='database',**values)
+    for key in ('input_tokens','output_tokens','total_tokens','elapsed_ms'):
+        usage[key]=usage.get(key,0)+answer_usage.get(key,0)
+    usage.update(engine='gemini',model=answer_usage.get('model'),calls=2 if interpreted else 1)
+    return reply(kind='message',message=answer,answer_source='gemini_with_authorized_data',**values)

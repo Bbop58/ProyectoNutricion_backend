@@ -6,10 +6,12 @@ Meal = Literal['', 'Desayuno', 'Almuerzo', 'Cena', 'Merienda', 'Snack']
 
 class AssistantIntent(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    action: Literal['recommend', 'patients', 'profile', 'more', 'select', 'confirm', 'cancel', 'help']
+    action: Literal['recommend', 'patients', 'profile', 'more', 'select', 'confirm', 'cancel', 'help', 'question']
     patient_name: str = Field(default='', max_length=80)
     meal: Meal = ''
     choice: int = Field(default=0, ge=0, le=10)
+    topic: Literal['links', 'allergies', 'goals', 'habits', 'medications', 'profile', 'assigned_recipes', 'recommendations', 'help'] = 'help'
+    link_scope: Literal['team', 'me'] = 'team'
 
 
 class AssistantQuery(BaseModel):

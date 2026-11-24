@@ -6,7 +6,7 @@ Web → Atención nutricional → **Carlitos · Asistente**. Disponible para `AD
 
 1. Seleccionar empresa/sucursal de trabajo y abrir el único chat.
 2. Escribir «Buscá al paciente Alex». Ante coincidencias, responder el número o nombre completo; si hay una sola, «sí» la selecciona.
-3. Seguir con «Mostrame su anamnesis». La ficha se consulta en el backend autorizado, sin enviarla al modelo.
+3. Seguir con «Mostrame su anamnesis». La ficha completa se muestra directamente desde el backend autorizado. También podés preguntar «¿está vinculado?», «¿conmigo?», «¿qué alergias tiene?» o «¿qué recetas ya tiene?»: Gemini elige la consulta, el backend valida permisos y obtiene los datos, y Gemini redacta con ese resultado.
 4. «Recomendale una cena» muestra hasta tres recetas existentes, con foto, ingredientes, porción, motivos y advertencias. «Otra opción» conserva paciente y categoría y excluye las anteriores.
 5. «Asignale la segunda» prepara la confirmación. Solo responder «confirmo» al pedido de confirmación guarda la asignación y bitácora. «No» descarta. También hay botones dentro de los mensajes; usan el mismo chat.
 6. «Nuevo chat» borra el contexto. Los resultados y preguntas quedan en la conversación (hasta 20 intercambios visibles), sin formularios separados de búsqueda/recomendación.
@@ -17,8 +17,9 @@ Las restricciones se toman de la anamnesis; no se agregan nuevas restricciones a
 
 - `GEMINI_STAFF_API_KEY`: clave privada exclusiva de este módulo, únicamente en Railway/backend. Si falta o falla, no utiliza `GEMINI_API_KEY` ni cambia de modelo automáticamente.
 - `GEMINI_STAFF_MODEL=gemini-3.5-flash-lite`. Pensamiento mínimo, temperatura 0, JSON estructurado y salida máxima de 192 tokens.
-- Una llamada por pedido escrito, máximo 800 caracteres. Solo se envían las instrucciones del intérprete, el texto que escribió el usuario y metadatos mínimos de interfaz (paciente seleccionado sí/no, número de opciones, categoría y confirmación pendiente). No se agrega la anamnesis, catálogo ni historial de conversaciones al prompt.
+- Máximo 800 caracteres por mensaje. Los pedidos de acción usan una interpretación; las preguntas de datos usan hasta dos llamadas (interpretación y respuesta fundamentada). Solo se envían las instrucciones del intérprete, el texto que escribió el usuario y metadatos mínimos de interfaz (paciente seleccionado sí/no, número de opciones, categoría y confirmación pendiente). No se agrega la anamnesis, catálogo ni historial completo al prompt del intérprete. Para redactar una respuesta se envía únicamente el resultado necesario de la herramienta autorizada: vínculos activos, sección consultada de anamnesis, recetas asignadas o motivos de propuestas. No se envían correos, códigos de emparejamiento, contraseñas, IDs internos ni el resto de la ficha. Solo se leen fichas con consentimiento.
 - Abrir el módulo no llama a Gemini. Respuestas breves reconocidas («sí», números, «asignale la segunda», «otra opción», «confirmo», «no») se resuelven localmente. Los pedidos libres usan una interpretación de Gemini.
+- Si falla la redacción, se devuelve un resumen de los hechos consultados, sin convertirlo en ayuda genérica. Las preguntas son de solo lectura y no pueden ejecutar asignaciones.
 - Tiempo de espera HTTP: 9 s, conexión 2 s y espera de pool 1 s. Una llamada, sin reintentos automáticos. Un error conserva el mensaje para reintentar.
 - Límite en memoria: seis interpretaciones/minuto por profesional y treinta/minuto por empresa, por proceso del servidor. Esto limita frecuencia, no constituye un tope monetario ni certifica el saldo disponible del proyecto Google.
 - El endpoint devuelve uso real reportado por Gemini; los logs contienen únicamente modelo, tokens y duración, sin texto del usuario ni ficha clínica.
@@ -34,6 +35,10 @@ Una ficha ausente o sin consentimiento no permite recomendar. La aprobación pro
 El contexto de conversación firmado dura veinte minutos y queda ligado al profesional, sesión, empresa y sucursal. No contiene anamnesis ni historial textual. El frontend devuelve este contexto sin modificarlo; IDs y opciones los valida el servidor. Cada tarjeta se relaciona con una propuesta firmada de cinco minutos ligada a autor, sesión, empresa, sucursal, paciente, receta y huellas de ficha/catálogo. Al confirmar se revalidan permisos y estado y se bloquean paciente, receta y ficha durante la transacción. Repetir una confirmación devuelve la asignación existente; un token procesado no restaura una asignación retirada después. La bitácora identifica la operación, sin copiar la anamnesis.
 
 Cambiar de espacio borra el contexto del componente y cancela solicitudes pendientes. El servidor rechaza una propuesta del espacio anterior. Al consultar recetas, la lista de pacientes asignados que recibe un cliente contiene solo su propio ID; no los IDs de otros pacientes del catálogo compartido.
+
+## Preguntas y contexto
+
+«¿Está vinculado?» consulta vínculos LINKED del paciente y profesionales activos de la misma empresa/sucursal. «¿Conmigo?» distingue el usuario actual de otros profesionales. Se excluyen vínculos pendientes/cancelados/expirados y no se exponen códigos ni notas privadas. Si hay varios candidatos, se pide elegir y después se retoma la pregunta original. Las preguntas sobre alergias, objetivos, hábitos, medicación, anamnesis y recetas se resuelven con herramientas de lectura acotadas. La explicación de propuestas no reemplaza la revisión profesional.
 
 ## API
 
