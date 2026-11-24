@@ -14,6 +14,7 @@ from app.models.activity_log import ActivityLog
 from app.models.clinical import PatientAnamnesis
 from app.models.company import Branch
 from app.models.patient_link import PatientNutritionistLink
+from app.models.notification import Notification
 from app.models.rbac import Role
 from app.models.recipe import Recipe, RecipeAssignment
 from app.models.tenant import Tenant
@@ -79,6 +80,7 @@ def test_candidates_are_local_scoped_and_exclude_known_allergens(demo):
     assert {r['id'] for r in result['recipes']} == {'shared', 'vegetarian'}
     assert result['usage'] == {'engine':'local','total_tokens':0}
     assert demo.db.query(RecipeAssignment).count() == 0
+    assert demo.db.query(Notification).count() == 0
     assert demo.db.query(ActivityLog).count() == 0
     assert service.search_patients(demo.db, demo.users['nutritionist'])['patients'] == [{'id':'patient','full_name':'Alex Demo'}]
     assert all(p['id'] not in {'other-branch','other-company'} for p in service.search_patients(demo.db, demo.actor)['patients'])
@@ -166,6 +168,7 @@ def test_stale_or_foreign_proposals_cannot_write(demo, change):
         service.confirm(demo.db,actor,token)
     assert error.value.status_code in {403,404,409}
     assert demo.db.query(RecipeAssignment).count() == 0
+    assert demo.db.query(Notification).count() == 0
 
 
 def test_unknown_allergies_missing_consent_and_missing_profile_require_review(demo):
@@ -272,3 +275,43 @@ def test_provider_failures_are_not_retried_or_exposed(monkeypatch,status,body):
     with pytest.raises(HTTPException) as error: staff_gemini.interpret('Pedido','user','tenant')
     assert error.value.status_code==503 and len(calls)==1
     assert 'staff-only-test-key' not in error.value.detail
+
+
+def test_confirm_notifies_only_patient_once_and_queues_push_after_commit(demo,monkeypatch):
+    from app.services.push_service import PushService
+    queued=[]
+    def enqueue(ids):
+        for identity in ids:
+            row=demo.db.get(Notification,identity)
+            assert row is not None and row.user_id=='patient'
+        queued.extend(ids)
+    monkeypatch.setattr(PushService,'enqueue',staticmethod(enqueue))
+    _,token=proposal(demo)
+    _,second_token=proposal(demo)
+    assert demo.db.query(Notification).count()==0 and queued==[]
+    first=service.confirm(demo.db,demo.actor,token)
+    service.confirm(demo.db,demo.actor,token)
+    service.confirm(demo.db,demo.actor,second_token)
+    rows=demo.db.query(Notification).all()
+    assert len(rows)==1 and queued==[rows[0].id]
+    notification=rows[0]
+    assert (notification.user_id,notification.tenant_id,notification.branch_id)==('patient','a','a1')
+    assert notification.type=='RECETA_ASIGNADA' and notification.reference_id=='shared'
+    assert notification.is_read is False and 'Mi plan nutricional' in notification.message
+    assert demo.db.get(RecipeAssignment,first['assignment_id']) is not None
+
+
+def test_failed_assignment_transaction_does_not_leave_notification_or_send_push(demo,monkeypatch):
+    from app.services.push_service import PushService
+    queued=[]
+    monkeypatch.setattr(PushService,'enqueue',staticmethod(lambda ids:queued.extend(ids)))
+    _,token=proposal(demo)
+    def fail_commit():
+        demo.db.flush()
+        raise RuntimeError('Simulated transaction failure')
+    with monkeypatch.context() as patch:
+        patch.setattr(demo.db,'commit',fail_commit)
+        with pytest.raises(RuntimeError):service.confirm(demo.db,demo.actor,token)
+        demo.db.rollback()
+    assert demo.db.query(RecipeAssignment).count()==0
+    assert demo.db.query(Notification).count()==0 and queued==[]

@@ -16,6 +16,7 @@ from app.models.activity_log import ActivityLog
 from app.models.clinical import PatientAnamnesis
 from app.models.company import Branch
 from app.models.patient_link import PatientNutritionistLink
+from app.models.notification import Notification
 from app.models.recipe import Recipe, RecipeAssignment
 from app.models.tenant import Tenant
 from app.models.user import User
@@ -278,6 +279,14 @@ def confirm(db, actor, token):
     if not existing:
         existing = RecipeAssignment(tenant_id=tenant_id, branch_id=branch_id, recipe_id=recipe.id, patient_id=patient.id)
         db.add(existing)
+        # Persist with the assignment; the existing after-commit hook queues FCM.
+        db.add(Notification(
+            id=str(uuid5(NAMESPACE_URL, 'staff-recipe-notification:' + data['jti'])),
+            user_id=patient.id, tenant_id=tenant_id, branch_id=branch_id,
+            title='Nueva receta en tu plan',
+            message='Tu profesional te asignó una nueva receta. Entrá a Mi plan nutricional para verla.',
+            type='RECETA_ASIGNADA', reference_id=recipe.id, is_read=False,
+        ))
         db.add(ActivityLog(id=audit_id, tenant_id=tenant_id, branch_id=branch_id, user_id=actor.id,
                            user_email=actor.email, user_name=actor.full_name, action='CARLITOS_RECETA_ASIGNADA',
                            category='CLINICAL', description=f'Asignación confirmada por el profesional: receta {recipe.id}, paciente {patient.id}.'))
