@@ -238,7 +238,7 @@ def query(db, actor, body):
         intent, usage = AssistantIntent(action=body.intent, meal=body.meal), dict(engine='local', total_tokens=0)
     else:
         intent, usage = staff_gemini.interpret(body.message, actor.id, actor.tenant_id)
-    if intent.action == 'help':
+    if intent.action not in {'recommend', 'patients'}:
         return dict(kind='help', message=HELP, usage=usage)
     name = intent.patient_name.strip()
     if name and (not selected or not all(mentions(normal(selected.full_name), word) for word in normal(name).split())):
