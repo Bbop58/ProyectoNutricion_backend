@@ -11,12 +11,12 @@ Web → Atención nutricional → **Carlitos · Asistente**. Disponible para `AD
 5. «Asignale la segunda» prepara la confirmación. Solo responder «confirmo» al pedido de confirmación guarda la asignación, bitácora y notificación al paciente en la misma transacción. La app muestra «Nueva receta en tu plan», con acceso a Ver plan; el mecanismo existente envía push después del commit cuando Firebase y el dispositivo están configurados. Repetir la confirmación no duplica el aviso. «No» descarta. También hay botones dentro de los mensajes; usan el mismo chat.
 6. «Nuevo chat» borra el contexto. Los resultados y preguntas quedan en la conversación (hasta 20 intercambios visibles), sin formularios separados de búsqueda/recomendación.
 
-Las restricciones se toman de la anamnesis; no se agregan nuevas restricciones a partir de la conversación en esta versión. Citas, mensajes, informes, pagos y edición clínica no se ejecutan desde el chat.
+Las restricciones se toman de la anamnesis; no se agregan nuevas restricciones a partir de la conversación en esta versión. La consulta de citas está disponible por estado y fechas. Aceptar/cancelar citas, enviar mensajes, ejecutar informes, pagos y edición clínica todavía no se ejecutan desde el chat.
 
 ## Separación y consumo
 
 - `GEMINI_STAFF_API_KEY`: clave privada exclusiva de este módulo, únicamente en Railway/backend. Si falta o falla, no utiliza `GEMINI_API_KEY` ni cambia de modelo automáticamente.
-- `GEMINI_STAFF_MODEL=gemini-3.5-flash-lite`. Pensamiento mínimo, temperatura 0, JSON estructurado y salida máxima de 192 tokens.
+- `GEMINI_STAFF_MODEL=gemini-3.5-flash-lite`. Pensamiento mínimo, temperatura 0, JSON estructurado y salida máxima de 256 tokens.
 - Máximo 800 caracteres por mensaje. Los pedidos de acción usan una interpretación; las preguntas de datos usan hasta dos llamadas (interpretación y respuesta fundamentada). Solo se envían las instrucciones del intérprete, el texto que escribió el usuario y metadatos mínimos de interfaz (paciente seleccionado sí/no, número de opciones, categoría y confirmación pendiente). No se agrega la anamnesis, catálogo ni historial completo al prompt del intérprete. Para redactar una respuesta se envía únicamente el resultado necesario de la herramienta autorizada: vínculos activos, sección consultada de anamnesis, recetas asignadas o motivos de propuestas. No se envían correos, códigos de emparejamiento, contraseñas, IDs internos ni el resto de la ficha. Solo se leen fichas con consentimiento.
 - Abrir el módulo no llama a Gemini. Respuestas breves reconocidas («sí», números, «asignale la segunda», «otra opción», «confirmo», «no») se resuelven localmente. Los pedidos libres usan una interpretación de Gemini.
 - Si falla la redacción, se devuelve un resumen de los hechos consultados, sin convertirlo en ayuda genérica. Las preguntas son de solo lectura y no pueden ejecutar asignaciones.
@@ -52,3 +52,12 @@ Las imágenes y asignaciones se consultan mediante las APIs existentes de receta
 ## Verificación
 
 Pruebas backend en `tests/test_staff_conversation.py` y `tests/test_staff_assistant.py`, más catálogo compartido y recetas/clínica existentes. Pruebas web en `staff-assistant.component.spec.ts` y navegación del dashboard. Build de producción con `API_BASE_URL` del backend. Los tests simulan Gemini y comprueban que nunca reciben la clave general. La prueba de conexión real usó un pedido genérico sobre un paciente demo; no se enviaron fichas clínicas.
+
+
+## Agenda conversacional
+
+«Mostrame mis citas pendientes» consulta PENDING (pendientes de aceptación), sin mezclarlas con ACCEPTED (aceptadas pendientes de pago) ni CONFIRMED. El administrador consulta todas las citas de la sucursal activa; el nutricionista solo las que atiende. «Sus citas» o «las citas de Alex» filtra además por el paciente autorizado; una consulta de mi agenda no se restringe por el paciente que quedó seleccionado anteriormente.
+
+Ejemplos: «Mostrame mis citas confirmadas», «Mostrame las citas pendientes del 1 al 15 de noviembre de 2026», «Mostrame las citas de Alex de hoy». Gemini recibe la fecha actual de Bolivia y traduce los límites a fechas ISO; el backend aplica los días inclusivos en UTC-4. Sin fechas se consultan todos los períodos y se informa ese alcance. Se muestran hasta diez citas ordenadas por fecha, el total real y aviso si quedan más. Las filas se agregan desde el resultado del backend, sin depender de que Gemini enumere correctamente todos los registros. No se envían motivos clínicos ni notas al proveedor.
+
+Esta función es de solo lectura: preguntar por citas no acepta, cancela, cobra ni completa ninguna cita. Los cambios necesarios están únicamente en backend; web y mobile no requieren nueva compilación para mostrar estos mensajes.

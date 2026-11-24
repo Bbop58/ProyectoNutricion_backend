@@ -7,7 +7,7 @@ from app.models.user import User
 from app.services import staff_assistant_service as actions
 
 CAPABILITIES = ['Buscar pacientes autorizados', 'Consultar anamnesis y vinculación',
-                'Consultar recetas ya asignadas', 'Proponer recetas del catálogo y explicar las propuestas',
+                'Consultar agenda y citas por estado o fechas', 'Consultar recetas ya asignadas', 'Proponer recetas del catálogo y explicar las propuestas',
                 'Preparar asignación y guardarla solo con confirmación explícita en otro turno']
 PROFILE_SECTIONS = {
     'allergies': ('allergies','other_allergies'),
@@ -23,9 +23,12 @@ PROFILE_SECTIONS = {
 def read(db, actor, patient, intent, state):
     tenant, branch = actions.scope_for(db, actor)
     base = {'tool':intent.topic, 'read_only':True, 'patient':patient.full_name if patient else None}
+    if intent.topic == 'appointments':
+        from app.services.staff_assistant_agenda import read as read_agenda
+        return read_agenda(db,actor,patient,intent)
     if intent.topic == 'help':
         return dict(**base,capabilities=CAPABILITIES,
-                    unsupported=['Ejecutar citas, mensajes, cobros o reportes desde este chat', 'Consultar pacientes fuera del espacio autorizado']), 'Puedo consultar pacientes, su anamnesis, vinculación y recetas, y preparar recomendaciones con confirmación antes de asignar.'
+                    unsupported=['Aceptar/cancelar/modificar citas, enviar mensajes, ejecutar cobros o reportes desde este chat', 'Consultar pacientes fuera del espacio autorizado']), 'Puedo consultar pacientes, su anamnesis, vinculación y recetas, y preparar recomendaciones con confirmación antes de asignar.'
     # Recheck access at the tool boundary, independently of the conversation planner.
     patient = actions.authorized_patient(db,actor,patient.id)
     if intent.topic == 'links':

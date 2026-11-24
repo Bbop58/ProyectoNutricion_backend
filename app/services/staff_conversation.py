@@ -97,7 +97,7 @@ def chat(db, actor, body):
     usage={'engine':'local','total_tokens':0}
     if intent is None:
         hints=dict(patient_selected=bool(state['patient']),patient_options=len(state['candidates']),
-                   recipe_options=len(state['recipes']),awaiting_confirmation=bool(state['pending']),meal=state['meal'],last_topic=state.get('last_topic'))
+                   recipe_options=len(state['recipes']),awaiting_confirmation=bool(state['pending']),meal=state['meal'],last_topic=state.get('last_topic'),today=datetime.now(timezone(timedelta(hours=-4))).date().isoformat(),timezone='America/La_Paz')
         intent,usage=staff_gemini.interpret(body.message,actor.id,actor.tenant_id,hints)
 
     def reply(**values):
@@ -148,7 +148,8 @@ def chat(db, actor, body):
     if intent.action=='help':
         return reply(kind='message',message='Podés conversar conmigo: «Buscá al paciente Alex», «Mostrame su anamnesis», «Recomendale una cena», «Otra opción» y «Asignale la segunda». Te pediré «confirmo» antes de guardar. Por ahora trabajo con pacientes y recetas de tu espacio autorizado.')
 
-    if intent.action=='question' and intent.topic=='help':
+    if intent.action=='question' and (intent.topic=='help' or (intent.topic=='appointments' and intent.appointment_scope=='schedule')):
+        state.update(last_topic=intent.topic,awaiting=None)
         facts,fallback=questions.read(db,actor,None,intent,state)
         return grounded_reply(reply,body.message,facts,fallback,usage,actor)
 
@@ -159,7 +160,7 @@ def chat(db, actor, body):
         clear_proposals(state)
         state.update(patient=None,candidates=[p['id'] for p in matches['patients']],followup=None)
         if intent.action!='patients':
-            state['followup']={'intent':intent.model_dump(),'message':question}
+            state['followup']={'intent':intent.model_dump(mode='json'),'message':question}
         if intent.action!='patients' and len(matches['patients'])==1 and not matches['has_more']:
             selected=choose_patient(db,actor,state,matches['patients'][0]['id'])
             state['followup']=None
@@ -172,7 +173,7 @@ def chat(db, actor, body):
     if not selected and len(state['candidates'])==1:
         selected=choose_patient(db,actor,state,state['candidates'][0])
     if not selected and state['candidates']:
-        state['followup']={'intent':intent.model_dump(),'message':question}
+        state['followup']={'intent':intent.model_dump(mode='json'),'message':question}
         # Re-authorize each original candidate; preserve numbering from the signed context.
         candidates=[actions.patient_summary(actions.authorized_patient(db,actor,identity)) for identity in state['candidates']]
         return reply(kind='patients',message='¿A cuál paciente te referís? Indicá el número o su nombre completo.',patients=candidates)
@@ -201,13 +202,16 @@ def chat(db, actor, body):
 
 
 def grounded_reply(reply, message, facts, fallback, usage, actor, **values):
+    facts=dict(facts)
+    lines=facts.pop('_display_lines','')
+    suffix=('\n\n'+lines) if lines else ''
     try:
         interpreted=usage.get('engine')=='gemini'
         answer,answer_usage=staff_gemini.answer(message,{**facts,'verified_summary':fallback},actor.id,actor.tenant_id,interpreted=interpreted)
     except HTTPException:
         # The factual tool result remains usable if the optional wording call fails.
-        return reply(kind='message',message=fallback,answer_source='database',**values)
+        return reply(kind='message',message=fallback+suffix,answer_source='database',**values)
     for key in ('input_tokens','output_tokens','total_tokens','elapsed_ms'):
         usage[key]=usage.get(key,0)+answer_usage.get(key,0)
     usage.update(engine='gemini',model=answer_usage.get('model'),calls=2 if interpreted else 1)
-    return reply(kind='message',message=answer,answer_source='gemini_with_authorized_data',**values)
+    return reply(kind='message',message=answer+suffix,answer_source='gemini_with_authorized_data',**values)

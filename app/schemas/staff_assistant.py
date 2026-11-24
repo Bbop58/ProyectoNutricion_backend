@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -10,8 +11,12 @@ class AssistantIntent(BaseModel):
     patient_name: str = Field(default='', max_length=80)
     meal: Meal = ''
     choice: int = Field(default=0, ge=0, le=10)
-    topic: Literal['links', 'allergies', 'goals', 'habits', 'medications', 'profile', 'assigned_recipes', 'recommendations', 'help'] = 'help'
+    topic: Literal['links', 'allergies', 'goals', 'habits', 'medications', 'profile', 'assigned_recipes', 'recommendations', 'appointments', 'help'] = 'help'
     link_scope: Literal['team', 'me'] = 'team'
+    appointment_status: Literal['ALL','PENDING','ACCEPTED','CONFIRMED','CANCELLED','COMPLETED'] = 'ALL'
+    appointment_scope: Literal['schedule','patient'] = 'schedule'
+    date_from: date | None = None
+    date_to: date | None = None
 
 
 class AssistantQuery(BaseModel):

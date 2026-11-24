@@ -249,7 +249,7 @@ def test_provider_uses_only_dedicated_key_and_bounded_json_payload(monkeypatch):
         assert request.headers['x-goog-api-key']=='staff-only-test-key'
         assert 'key=' not in str(request.url)
         payload=json.loads(request.content)
-        assert payload['generationConfig']['maxOutputTokens']==192
+        assert payload['generationConfig']['maxOutputTokens']==256
         assert '' not in payload['generationConfig']['responseSchema']['properties']['meal']['enum']
         assert len(payload['contents'])==1
         assert 'anamnesis' not in payload['contents'][0]['parts'][0]['text']
