@@ -80,6 +80,7 @@ class BackupRecoveryService:
                 if any(any(word in key.lower() for word in ('password', 'secret', 'token', 'ip_address')) for key in row): raise ValueError('El respaldo contiene datos de seguridad no permitidos.')
                 if 'tenant_id' in Base.metadata.tables[name].c and row.get('tenant_id') != tenant_id: raise ValueError('El archivo mezcla empresas.')
                 if name == 'payments' and row.get('status') != 'COMPLETED': raise ValueError('Solo se recuperan cobros confirmados.')
+                if name == 'payments' and row.get('purpose') == 'SUBSCRIPTION_REFUND': raise ValueError('Las devoluciones de plataforma no se recuperan desde respaldos de empresa.')
                 if name == 'appointments' and row.get('status') != 'COMPLETED': raise ValueError('Solo se recuperan citas atendidas.')
         if total > 200000: raise ValueError('El respaldo supera 200.000 registros.')
         return snapshot

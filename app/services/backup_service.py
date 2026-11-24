@@ -88,6 +88,7 @@ class BackupService:
             if name == 'recipe_assignments': query = query.filter(RecipeAssignment.recipe_id.in_(recipe_ids))
             else: query = query.filter(model.tenant_id == tenant_id)
             if name in {'payments', 'appointments'}: query = query.filter(model.status == 'COMPLETED')
+            if name == 'payments': query = query.filter(Payment.purpose != 'SUBSCRIPTION_REFUND')
             if name == 'activity_logs':
                 from app.services.audit_policy import is_mutation
                 records = [r for r in query.all() if is_mutation(r.action)]

@@ -32,6 +32,10 @@ def resolve_download(path, report_request, user, db):
         if user.role_id != 'SUPERADMIN':
             raise HTTPException(403, 'No tienes acceso a la plataforma.')
         return platform.assignment_document(is_platform_note[1], user, db)
+    match = re.fullmatch(r'/subscriptions/wallet-refunds/([\w-]+)/pdf', route)
+    if match:
+        from app.api.v1.subscription_wallet_refunds import document
+        return document(match[1], db, user)
     match = re.fullmatch(r'/appointments/([\w-]+)/(pdf|receipt/pdf)', route)
     if match:
         action = appointments.appointment_document if match[2] == 'pdf' else appointments.appointment_receipt

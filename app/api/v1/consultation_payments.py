@@ -87,10 +87,10 @@ def my_receipts(limit: int = 50, offset: int = 0, db: Session = Depends(get_db),
         raise HTTPException(422, detail='Paginación inválida.')
     payments = db.query(Payment).filter_by(patient_id=user.id, cashier_id=None, status='COMPLETED').order_by(Payment.paid_at.desc()).limit(offset + limit).all()
     subscriptions = db.query(SubscriptionReceipt).filter_by(user_id=user.id).order_by(SubscriptionReceipt.paid_at.desc()).limit(offset + limit).all()
-    rows = [dict(id=p.id, kind='WALLET_TOPUP' if p.purpose == 'WALLET_TOPUP' else 'CONSULTATION',
+    rows = [dict(id=p.id, kind='WALLET_REFUND' if p.purpose == 'SUBSCRIPTION_REFUND' else 'WALLET_TOPUP' if p.purpose == 'WALLET_TOPUP' else 'CONSULTATION',
                  concept=p.concept, amount=p.amount, currency=p.currency, method=p.payment_method,
                  buyer_name=p.customer_name, buyer_email=p.customer_email, paid_at=p.paid_at,
-                 reference=p.paypal_capture_id or p.id, pdf_path=f'/payments/{p.id}/pdf') for p in payments]
+                 reference=p.paypal_capture_id or p.id, pdf_path=f'/subscriptions/wallet-refunds/{p.id}/pdf' if p.purpose == 'SUBSCRIPTION_REFUND' else f'/payments/{p.id}/pdf') for p in payments]
     rows += [dict(id=s.id, kind='SUBSCRIPTION', concept='Suscripción Premium IA · 30 días' if s.plan_name == 'CLIENTE_PREMIUM' else f'Suscripción {s.plan_name}',
                   amount=float(s.amount), currency=s.currency, method='PAYPAL', buyer_name=s.buyer_name,
                   buyer_email=s.buyer_email, paid_at=s.paid_at, reference=s.paypal_capture_id,

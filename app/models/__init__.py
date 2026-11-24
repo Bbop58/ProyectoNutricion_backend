@@ -9,6 +9,7 @@ from app.models.recipe import Recipe, RecipeAssignment
 from app.models.clinical import PatientAnamnesis, ClinicalRecord
 from app.models.subscription import Subscription
 from app.models.subscription_receipt import SubscriptionReceipt
+from app.models.subscription_wallet_refund import SubscriptionWalletRefund
 from app.models.payment import Payment
 from app.models.wallet import WalletMovement
 from app.models.appointment import Appointment

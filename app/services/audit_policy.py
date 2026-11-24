@@ -73,7 +73,7 @@ def audit_business_changes(db, flush_context, instances):
             if table == 'appointments' and state == 'ACTUALIZADO':
                 action = {'CONFIRMED': 'CITA_CONFIRMADA', 'CANCELLED': 'CITA_CANCELADA', 'COMPLETED': 'CITA_ATENDIDA'}.get(obj.status, action)
             if table == 'payments' and getattr(obj, 'status', '') == 'COMPLETED' and (state == 'CREADO' or inspect(obj).attrs.status.history.has_changes()):
-                action = 'COBRO_CONFIRMADO'
+                action = 'DEVOLUCION_WALLET_CONFIRMADA' if obj.purpose == 'SUBSCRIPTION_REFUND' else 'COBRO_CONFIRMADO'
             from app.core.workspace import current
             scope = current(db)
             raw_tenant_id = company or (scope.tenant_id if scope else None)
