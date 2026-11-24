@@ -137,7 +137,7 @@ def attribute_and_check_writes(db, flush_context, instances):
             if obj.__tablename__ == 'recipe_assignments':
                 from app.models.recipe import Recipe
                 parent = db.execute(select(Recipe.__table__.c.tenant_id, Recipe.__table__.c.branch_id).where(Recipe.__table__.c.id == obj.recipe_id)).first()
-                if parent and (parent.tenant_id != obj.tenant_id or parent.branch_id != obj.branch_id):
+                if parent and (parent.tenant_id != obj.tenant_id or (parent.branch_id is not None and parent.branch_id != obj.branch_id)):
                     raise ForbiddenException('La receta y el paciente deben pertenecer a la misma sucursal.')
             if obj.branch_id:
                 branch_company = db.execute(select(Branch.__table__.c.tenant_id).where(Branch.__table__.c.id == obj.branch_id)).scalar_one_or_none()

@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     # Gemini AI
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-flash-lite-latest"
+    GEMINI_STAFF_API_KEY: str = ""
+    GEMINI_STAFF_MODEL: str = "gemini-3.5-flash-lite"
 
     # Firebase Cloud Messaging
     FIREBASE_PROJECT_ID: str = ""

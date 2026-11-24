@@ -15,8 +15,10 @@ from app.schemas.recipe import RecipeCreate, RecipeUpdate, RecipeResponse
 router = APIRouter(prefix="/recipes", tags=["Recetas"])
 
 
-def _recipe_to_response(recipe: Recipe) -> RecipeResponse:
+def _recipe_to_response(recipe: Recipe, viewer: User | None = None) -> RecipeResponse:
     assigned_ids = [a.patient_id for a in recipe.assignments] if recipe.assignments else []
+    if viewer is not None and viewer.role_id == 'CLIENTE':
+        assigned_ids = [viewer.id] if viewer.id in assigned_ids else []
     data = RecipeResponse.model_validate(recipe)
     data.assigned_patient_ids = assigned_ids
     return data
@@ -47,7 +49,7 @@ def get_my_plan_recipes(
     else:
         recipes = []
 
-    return [_recipe_to_response(r) for r in recipes]
+    return [_recipe_to_response(r, current_user) for r in recipes]
 
 
 @router.get("", response_model=List[RecipeResponse])
@@ -73,7 +75,7 @@ def list_recipes(
         query = query.filter(Recipe.difficulty == difficulty)
 
     recipes = query.order_by(Recipe.created_at.desc()).all()
-    return [_recipe_to_response(r) for r in recipes]
+    return [_recipe_to_response(r, current_user) for r in recipes]
 
 
 @router.post("", response_model=RecipeResponse, status_code=status.HTTP_201_CREATED)
@@ -185,7 +187,7 @@ def get_recipe(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Receta no encontrada.")
     if current_user.role_id != "SUPERADMIN" and recipe.tenant_id and current_user.tenant_id and recipe.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tienes permisos para ver recetas de otra clínica.")
-    return _recipe_to_response(recipe)
+    return _recipe_to_response(recipe, current_user)
 
 
 @router.put("/{recipe_id}", response_model=RecipeResponse)
@@ -314,7 +316,10 @@ def assign_recipe_to_patient(
     if not recipe:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Receta no encontrada.")
 
-    patient = db.query(User).filter(User.id == patient_id).first()
+    patient = require_patient_access(db, current_user, patient_id)
+    if patient.role_id != 'CLIENTE' or not patient.is_active:
+        raise HTTPException(status_code=403, detail='Solo puedes asignar recetas a pacientes activos autorizados.')
+    db.query(User).filter(User.id == patient.id).with_for_update().one()
     if not patient:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paciente no encontrado.")
 

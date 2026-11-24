@@ -16,6 +16,7 @@ from app.api.v1.backup import router as backup_router
 from app.api.v1.reports import router as reports_router
 from app.api.v1.plans import router as plans_router
 from app.api.v1.chat import router as chat_router
+from app.api.v1.staff_assistant import router as staff_assistant_router
 from app.api.v1.food import router as food_router
 from app.api.v1.weekly_menu import router as weekly_menu_router
 from app.api.v1.automation import router as automation_router
@@ -40,6 +41,7 @@ api_v1_router.include_router(backup_router)
 api_v1_router.include_router(reports_router)
 api_v1_router.include_router(plans_router)
 api_v1_router.include_router(chat_router)
+api_v1_router.include_router(staff_assistant_router)
 api_v1_router.include_router(food_router)
 api_v1_router.include_router(weekly_menu_router)
 api_v1_router.include_router(automation_router)
