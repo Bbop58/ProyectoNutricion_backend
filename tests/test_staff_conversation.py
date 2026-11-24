@@ -239,7 +239,8 @@ def test_assigned_recipe_and_proposal_tools_read_only_current_workspace(demo):
     from app.schemas.staff_assistant import AssistantQuery
     proposals=service.query(demo.db,demo.actor,AssistantQuery(message='Cena',patient_id='patient',intent='recommend',meal='Cena'))
     state={'recipes':[{'id':r['id']} for r in proposals['recipes']]}
-    facts,_=questions.read(demo.db,demo.actor,demo.users['patient'],AssistantIntent(action='question',topic='recommendations'),state)
+    facts,explanation=questions.read(demo.db,demo.actor,demo.users['patient'],AssistantIntent(action='question',topic='recommendations'),state)
+    assert 'fibra' in explanation and 'Pérdida de grasa' in explanation
     assert {r['title'] for r in facts['recipes']}=={'shared','vegetarian'}
     assert all(r['current_filter_eligible'] for r in facts['recipes'])
     token=next(r['proposal_token'] for r in proposals['recipes'] if r['id']=='shared')

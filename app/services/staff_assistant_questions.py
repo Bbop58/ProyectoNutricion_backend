@@ -82,5 +82,8 @@ def read(db, actor, patient, intent, state):
         details.append(item)
     summary=(('Recetas asignadas a ' if intent.topic=='assigned_recipes' else 'Propuestas actuales para ')+patient.full_name+': '+
              (', '.join(r['title'] for r in details) if details else 'no hay registros disponibles.'))
+    if intent.topic=='recommendations' and details:
+        explanations=[r['title']+': '+'; '.join(r['reasons']+r['warnings']) for r in details]
+        summary=f'Objetivo registrado: {profile.goal}. Motivos de las recetas: '+' | '.join(explanations)
     profile_context=({field:getattr(profile,field) for field in ('goal','allergies','other_allergies','pathologies','other_pathologies','food_preferences')} if profile else None)
     return dict(**base,recipes=details,profile_context=profile_context,limited_to=len(details),clinical_decision='Requiere revisión profesional de ficha, ingredientes y porción'),summary

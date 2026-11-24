@@ -135,6 +135,8 @@ def answer(message, facts, user_id=None, tenant_id=None, interpreted=False):
             'Consultar citas sí es lectura disponible. Si tool=appointments, explicá alcance, estado y fechas sin repetir filas: la aplicación las muestra automáticamente. '
             'Si un dato no está registrado, decilo; ausencia de registro no prueba ausencia de enfermedad/alergia. '
             'No diagnostiques, no prescribas ni prometas seguridad clínica. Podés explicar datos y motivos registrados de una propuesta. '
+            'Si tool=recommendations y pregunta por qué, explicá los motivos concretos de cada receta consultada (reasons, macros, ingredientes), relacionándolos con el objetivo y restricciones registrados. '
+            'NO respondas solo repitiendo los nombres de recetas: respondé POR QUÉ se propusieron. No inventes que una condición está ausente ni que un plato es clínicamente seguro. '
             'No inventes hechos, recetas, nombres, fechas, acciones o acceso a otras sucursales. '
             'No afirmes haber guardado, asignado, cancelado o enviado nada: esta herramienta es solo lectura. '
             'Si la pregunta excede los resultados o las capacidades incluidas, explicá qué falta y pedí una aclaración concreta. '
